@@ -31,13 +31,13 @@ def load_all_models():
     try:
         url = get_drive_url(FILE_IDS["models"])
         response = requests.get(url)
-        # joblib은 파일 객체나 바이트 스트림을 직접 읽을 수 있습니다.
-        data = joblib.load(BytesIO(response.content))
-        if not data:
-            st.error("모델 파일이 비어 있습니다.")
+        # response.content를 BytesIO로 감싸서 joblib으로 전달 (현재 코드와 동일하지만 확인 필수)
+        model_file = BytesIO(response.content)
+        data = joblib.load(model_file)
         return data
     except Exception as e:
-        st.error(f"모델 파일 로드 실패: {e}")
+        # 에러 메시지를 더 구체적으로 찍어서 확인
+        st.error(f"모델 파일 로드 상세 에러: {e}")
         return {}
     
 def get_realtime_status_with_ai(full_df, models_dict):
@@ -194,7 +194,9 @@ def get_machine_status(mach, day_df, _models_dict):
 @st.cache_data
 def load_process_data():
     try:
-        df = pd.read_csv('전처리데이터.csv')
+        # 파일명을 '대시보드_샷별.csv' 혹은 GitHub에 올린 실제 파일명으로 일치시키세요.
+        # 한글 깨짐 방지를 위해 encoding='utf-8-sig' 추가
+        df = pd.read_csv('대시보드_샷별.csv', encoding='utf-8-sig') 
         df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'])
         return df
     except:
@@ -209,7 +211,7 @@ def get_available_months():
     try:
         url = get_drive_url(FILE_IDS["shot_data"])
         # 전체를 다 읽지 않고 필요한 컬럼만 읽기
-        df_temp = pd.read_csv(url, usecols=['Timestamp_사출'])
+        df_temp = pd.read_csv(url, usecols=['Timestamp_사출'], encoding='utf-8-sig')
         return sorted(pd.to_datetime(df_temp['Timestamp_사출']).dt.strftime('%Y-%m').unique(), reverse=True)
     except Exception as e:
         st.error(f"월 목록 로드 실패: {e}")
@@ -557,4 +559,5 @@ with tab_analysis:
         else:
             st.warning("분석할 공정 데이터 컬럼을 찾을 수 없습니다.")
     else:
+
         st.success(f"✅ {label}에는 불량 데이터가 없습니다.")
