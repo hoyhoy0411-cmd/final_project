@@ -62,7 +62,7 @@ def download_file(file_id, output_name):
 @st.cache_data
 def load_data():
     file_path = download_file(FILE_IDS['prep_data'], '전처리데이터.csv')
-    df = pd.read_csv(file_path)
+    df = pd.read_csv(file_path, encoding='utf-8-sig')
     df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'])
     df['YearMonth'] = df['Timestamp_사출'].dt.to_period('M').astype(str)
     return df
@@ -551,4 +551,5 @@ def main():
             st.info("💡 AI 모델의 현장 적합성을 평가하려면 결과 데이터를 업로드하세요.")
 
 if __name__ == "__main__":
+
     main()
