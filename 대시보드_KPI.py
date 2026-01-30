@@ -20,22 +20,24 @@ st.set_page_config(page_title="공정 품질 KPI 대시보드", layout="wide")
 
 # --- 3. 상수 및 경로 설정 ---
 MONTHLY_CONFIG = {
-    "2023-09": {
-        "shot": "1ed7eRVk25aTBN1aVsvzEZZQrbGPN0lbY",
-        "pre": "1rw9Kv055wD1w_HLO1Pdizbk4CEfHAeiF"
-    },
-    "2023-10": {
-        "shot": "1gYE2xh6TcrtlNd6rAYe0MrjOmkTvz9vL",
-        "pre": "12ZKLaEUw09JGno05isB7QQW_zMRicl-l"
-    },
-    "2023-11": {
-        "shot": "1QPNxQffDP3F22KjyXhcORSxgY_jYha96",
-        "pre": "1xaObr2lANjOsHENGkslUqNiHOuHEaVFb"
-    }
+    "2023-09": {"shot": "1ed7eRVk25aTBN1aVsvzEZZQrbGPN0lbY", "pre": "1rw9Kv055wD1w_HLO1Pdizbk4CEfHAeiF"},
+    "2023-10": {"shot": "1gYE2xh6TcrtlNd6rAYe0MrjOmkTvz9vL", "pre": "12ZKLaEUw09JGno05isB7QQW_zMRicl-l"},
+    "2023-11": {"shot": "1QPNxQffDP3F22KjyXhcORSxgY_jYha96", "pre": "1xaObr2lANjOsHENGkslUqNiHOuHEaVFb"}
 }
 
-MODEL_FILE_ID = "1ozTrBdUE-4fq-wghLSCInzzuXHtVcmTc"
-MODEL_PATH = "injection_models.pkl"
+# [추가] 설비별 모델 파일 ID 매핑
+MACHINE_MODEL_CONFIG = {
+    "D01": "1E7PwqwTu64FJjqWOIYWrodfC6migkKbR",
+    "D10": "1GYsZXdCLc7izqYag6gQ40q81CiQN7WBR",
+    "F09": "1yPlNAUEatopQbHqv1BInnD4qP3sRRzBZ",
+    "F11": "1uTdb1Z9L04sJYq93KO0zXuk1VJWQWZ9Y",
+    "G01": "1zHx1w2GPF902iz3eKMziy34NuLMu1adG",
+    "G02": "1_xQvj0l2hcCcuDrisQxJZ5Mss6Fep96k",
+    "G03": "1sDcIxxQ1MwXIyXfDq-3t6tkDwMePY46t",
+    "G05": "17jPNOz-SeLwh9bRd8kDrsPcsGmBCXFAS",
+    "G06": "1dF_ZCpJsXTFK16JXFKx5PbFYNqHF1p1o",
+    "G10": "1LsTOoSUSUPqqx_088wv8YvHl9RUDbvR9"
+}
 
 # --- 4. 파일 다운로드 함수 ---
 def download_from_gdrive(file_id, output_path):
@@ -50,12 +52,28 @@ def download_from_gdrive(file_id, output_path):
 
 # --- [수정] 6. 데이터 로드 및 캐싱 함수 ---
 
-@st.cache_resource
-def load_ai_models():
-    download_from_gdrive(MODEL_FILE_ID, MODEL_PATH)
-    if os.path.exists(MODEL_PATH):
-        return joblib.load(MODEL_PATH)
-    return {}
+# --- 6. [수정] 설비별 모델 로드 및 캐싱 함수 ---
+# 메모리 절약을 위해 max_entries를 설정하여 필요한 모델만 메모리에 올립니다.
+@st.cache_resource(max_entries=1) 
+def load_single_machine_model(mach_no):
+    file_id = MACHINE_MODEL_CONFIG.get(mach_no)
+    if not file_id:
+        return None
+    
+    model_path = f"model_{mach_no}.pkl"
+    # 다운로드 성공 시 joblib으로 로드
+    if download_from_gdrive(file_id, model_path):
+        return joblib.load(model_path)
+    return None
+
+def get_all_models_for_monitoring(mach_list):
+    """실시간 관제 센터(Tab 1)에서 여러 설비를 한꺼번에 분석할 때 사용"""
+    models = {}
+    for m in mach_list:
+        mdl = load_single_machine_model(m)
+        if mdl:
+            models[m] = mdl
+    return models
 
 @st.cache_data
 def load_monthly_data(year_month):
@@ -183,38 +201,45 @@ def get_machine_status(mach, m_week_data, models_dict):
         return f"error ({str(e)})"
     
 # ==========================================
-# 8. 메인 실행부 (UI 구성)
-# ==========================================
+# --- 8. 메인 실행부 (UI 구성) ---
 st.sidebar.title("🛠️ 공정 필터링")
 
-# 월 목록 로드 및 선택
+# 1. 월 선택
 month_list = sorted(list(MONTHLY_CONFIG.keys()), reverse=True)
 selected_month = st.sidebar.selectbox("📅 분석 월 선택", month_list)
 
-# 데이터 로드
+# 2. 데이터 로드
 df_shot, df_pre = load_monthly_data(selected_month)
-models_dict = load_ai_models()
+
+if df_shot.empty:
+    st.error("데이터를 불러오지 못했습니다.")
+    st.stop()
+
+# 3. 설비 선택 (여기서 한 번만 정의)
+machine_list = sorted(df_shot['MACHNO'].unique().tolist())
+selected_machine = st.sidebar.selectbox("🏭 상세 분석 설비", machine_list)
+
+# 4. 관제 센터용 모델 로드 (현재 가동 설비 대상)
+week_df = get_recent_7days_status(df_pre)
+if not week_df.empty:
+    current_machs = sorted(week_df['MACHNO'].unique().tolist())
+    models_dict = get_all_models_for_monitoring(current_machs)
+else:
+    models_dict = {}
+
+# 5. 상세 분석용 모델 로드 (선택된 1개 설비)
+# --- 데이터 변수명 통일 및 전월 데이터 로드 ---
+df_filtered_month = df_shot  # KPI 계산에 사용되는 메인 변수
 
 # 전월 데이터 로드 (KPI 비교용)
 current_idx = month_list.index(selected_month)
 if current_idx + 1 < len(month_list):
-    df_last_month, _ = load_monthly_data(month_list[current_idx + 1])
+    # load_monthly_data는 (shot, pre) 튜플을 반환하므로 [0]만 가져옵니다.
+    df_last_month = load_monthly_data(month_list[current_idx + 1])[0]
 else:
     df_last_month = pd.DataFrame()
 
-# 변수명 통일 (중요!)
-df_filtered_month = df_shot  
-df_final = df_shot
-
-# 세션 스테이트 관리
-df_final = df_shot
-
-# 설비 선택 사이드바
-if not df_shot.empty:
-    machine_list = sorted(df_shot['MACHNO'].unique().tolist())
-    selected_machine = st.sidebar.selectbox("🏭 상세 분석 설비", machine_list)
-else:
-    st.stop()
+df_final = df_shot # 하단 품질 진단 로직용
 
 # 탭 구성
 tab_kpi, tab_detail, tab_analysis = st.tabs(["🚀 공장 전체 KPI", "🔍 설비 상세 리포트", "🚨 불량 원인 분석"])
@@ -471,7 +496,6 @@ with tab_analysis:
             
             r_data = ratios + [ratios[0]]
             theta_data = valid_cols + [valid_cols[0]]
-
             fig_radar = go.Figure()
             fig_radar.add_trace(go.Scatterpolar(r=r_data, theta=theta_data, fill='toself', name='불량 특성'))
             fig_radar.add_trace(go.Scatterpolar(r=[100]*len(theta_data), theta=theta_data, 
