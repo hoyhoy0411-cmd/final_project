@@ -206,8 +206,9 @@ def get_machine_status(mach, m_week_data, models_dict):
 # --- 8. 메인 실행부 (UI 구성) ---
 st.sidebar.title("🛠️ 공정 필터링")
 
-# 1. 월 선택 (표시 형식 변경: 2023-09 -> 2025년 9월)
+# 1. 월 선택 (기존 코드 유지)
 raw_month_list = sorted(list(MONTHLY_CONFIG.keys()), reverse=True)
+latest_month_key = raw_month_list[0] # 가장 최신월 (2023-11)
 
 # 내부 키와 표시용 이름을 매핑 (2023-XX를 2025년 XX월로 치환)
 display_month_map = {
@@ -224,19 +225,22 @@ selected_display_month = st.sidebar.selectbox(
 # 실제 데이터 로드에 사용할 키 추출 (예: 2023-11)
 selected_month = [k for k, v in display_month_map.items() if v == selected_display_month][0]
 
-# 2. 데이터 로드 (이후 로직 동일)
+# 2. 분석용 데이터 로드 (사이드바 선택에 따라 바뀜)
 df_shot, df_pre = load_monthly_data(selected_month)
 
-if df_shot.empty:
-    st.error("데이터를 불러오지 못했습니다.")
-    st.stop()
+# [추가] 설비 리스트 및 선택 로직 (필요함)
+machine_list = sorted(df_shot['MACHNO'].unique().tolist()) if not df_shot.empty else []
+selected_machine = st.sidebar.selectbox("🏗️ 분석 대상 설비", options=machine_list) if machine_list else None
 
-# 3. 설비 선택 (여기서 한 번만 정의)
-machine_list = sorted(df_shot['MACHNO'].unique().tolist())
-selected_machine = st.sidebar.selectbox("🏭 상세 분석 설비", machine_list)
+# [수정] 실시간 관제 전용 데이터 로드
+if selected_month == latest_month_key:
+    df_pre_for_monitor = df_pre
+else:
+    _, df_pre_for_monitor = load_monthly_data(latest_month_key)
 
-# 4. 관제 센터용 모델 로드 (현재 가동 설비 대상)
-week_df = get_recent_7days_status(df_pre)
+# 3. 관제 센터용 데이터 (df_pre_for_monitor를 명시적으로 사용)
+week_df = get_recent_7days_status(df_pre_for_monitor)
+
 if not week_df.empty:
     current_machs = sorted(week_df['MACHNO'].unique().tolist())
     models_dict = get_all_models_for_monitoring(current_machs)
@@ -343,12 +347,10 @@ with tab_kpi:
                     legend=dict(orientation="h", y=1.1)
                 )
                 st.plotly_chart(fig_compare, width='stretch')
-
     # [3] 실시간 관제 센터
-# [3] 실시간 관제 센터
     st.divider()
     st.subheader("🏭 실시간 설비 이상 징후 관제 센터 (최근 7일)")
-
+    st.info(f"💡 현재 관제 센터는 **실시간 상태**를 유지하기 위해 선택 월과 무관하게 **최신 데이터({latest_month_key})**를 분석 중입니다.")
     week_df = get_recent_7days_status(df_pre)
     if not week_df.empty:
         all_mach_list = sorted(week_df['MACHNO'].unique())
