@@ -136,15 +136,21 @@ def load_monthly_data(year_month):
         st.error(f"데이터 로드 실패: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
-# --- [수정] 7. 실시간 관제용 로직 (현재 로드된 데이터 활용) ---
+# --- [수정] 관제 센터용 데이터 로직 (Tail 적용) ---
 def get_recent_7days_status(df_pre):
-    """별도 파일 읽기 없이 현재 로드된 전처리 데이터에서 최근 7일을 추출"""
     if df_pre.empty:
         return pd.DataFrame()
     
+    # 1. 일단 최신 7일 데이터를 가져오되
     latest_date = df_pre['Timestamp_사출'].max()
     start_date = latest_date - pd.Timedelta(days=6)
-    return df_pre[df_pre['Timestamp_사출'] >= start_date].copy()
+    week_df = df_pre[df_pre['Timestamp_사출'] >= start_date].copy()
+    
+    # 2. 성능 테스트를 위해 각 설비별로 가장 최근 '100건'만 남깁니다 (Tail 추출)
+    # 데이터가 너무 많아 연산이 밀리는 것을 방지합니다.
+    week_df = week_df.groupby('MACHNO').tail(100).reset_index(drop=True)
+    
+    return week_df
 
 # --- [수정] 7. 실시간 관제용 로직 (모델 딕셔너리 구조 반영) ---
 
@@ -462,7 +468,11 @@ with tab_kpi:
 # ==============================================================================
 with tab_detail:
     st.markdown(f"### 🔍 {selected_machine} 설비 정밀 분석 리포트")
-    m_df = df_filtered_month[df_filtered_month['MACHNO'] == selected_machine].sort_values('Timestamp_사출')
+    
+    # 해당 설비 데이터 중 가장 최근 200건만 가져와서 시각화/분석 진행
+    m_df_full = df_filtered_month[df_filtered_month['MACHNO'] == selected_machine].sort_values('Timestamp_사출')
+    m_df = m_df_full.tail(200) # 전체 데이터 대신 Tail(200건)만 사용하여 메모리 보호
+    
     if 'Timestamp_사출' in m_df.columns:
         m_df['Date'] = m_df['Timestamp_사출'].dt.date
 
@@ -595,6 +605,7 @@ with tab_analysis:
             st.warning("분석할 공정 데이터 컬럼을 찾을 수 없습니다.")
     else:
         st.success(f"✅ {label}에는 불량 데이터가 없습니다.")
+
 
 
 
