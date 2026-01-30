@@ -1,10 +1,11 @@
-streamlit
-pandas
-numpy
+streamlit==1.38.0
+pandas==2.2.2
+numpy==1.26.4
 plotly
-scikit-learn
-joblib
+scikit-learn==1.5.1
+joblib==1.4.2
 requests
 pyarrow
 gdown
-xgboost
+xgboost==2.1.1
+
