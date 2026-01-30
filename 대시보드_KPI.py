@@ -204,11 +204,25 @@ def get_machine_status(mach, m_week_data, models_dict):
 # --- 8. 메인 실행부 (UI 구성) ---
 st.sidebar.title("🛠️ 공정 필터링")
 
-# 1. 월 선택
-month_list = sorted(list(MONTHLY_CONFIG.keys()), reverse=True)
-selected_month = st.sidebar.selectbox("📅 분석 월 선택", month_list)
+# 1. 월 선택 (표시 형식 변경: 2023-09 -> 2025년 9월)
+raw_month_list = sorted(list(MONTHLY_CONFIG.keys()), reverse=True)
 
-# 2. 데이터 로드
+# 내부 키와 표시용 이름을 매핑 (2023-XX를 2025년 XX월로 치환)
+display_month_map = {
+    m: m.replace("2023-", "2025년 ").replace("-", "") + "월" 
+    for m in raw_month_list
+}
+
+# 사용자에게는 '2025년 11월'로 보여줌
+selected_display_month = st.sidebar.selectbox(
+    "📅 분석 월 선택", 
+    options=list(display_month_map.values())
+)
+
+# 실제 데이터 로드에 사용할 키 추출 (예: 2023-11)
+selected_month = [k for k, v in display_month_map.items() if v == selected_display_month][0]
+
+# 2. 데이터 로드 (이후 로직 동일)
 df_shot, df_pre = load_monthly_data(selected_month)
 
 if df_shot.empty:
@@ -232,10 +246,10 @@ else:
 df_filtered_month = df_shot  # KPI 계산에 사용되는 메인 변수
 
 # 전월 데이터 로드 (KPI 비교용)
-current_idx = month_list.index(selected_month)
-if current_idx + 1 < len(month_list):
-    # load_monthly_data는 (shot, pre) 튜플을 반환하므로 [0]만 가져옵니다.
-    df_last_month = load_monthly_data(month_list[current_idx + 1])[0]
+current_idx = raw_month_list.index(selected_month)
+if current_idx + 1 < len(raw_month_list):
+    last_month_key = raw_month_list[current_idx + 1]
+    df_last_month = load_monthly_data(last_month_key)[0]
 else:
     df_last_month = pd.DataFrame()
 
@@ -329,42 +343,81 @@ with tab_kpi:
                 st.plotly_chart(fig_compare, width='stretch')
 
     # [3] 실시간 관제 센터
+# [3] 실시간 관제 센터
     st.divider()
     st.subheader("🏭 실시간 설비 이상 징후 관제 센터 (최근 7일)")
 
-    week_df = get_recent_7days_status(df_pre) # 새로 만든 함수 사용
+    week_df = get_recent_7days_status(df_pre)
     if not week_df.empty:
-        start_day = week_df['Timestamp_사출'].min().date()
-        end_day = week_df['Timestamp_사출'].max().date()
-        st.write(f"📅 **관제 기간:** {start_day} ~ {end_day} (최근 7일간)")
-        
         all_mach_list = sorted(week_df['MACHNO'].unique())
         
-        # 5개씩 나누어 표시
-        cols = st.columns(5)
-        cols2 = st.columns(5)
-        all_cols = cols + cols2
-        
-        for i, mach in enumerate(all_mach_list):
-            if i >= 10: break # 최대 10개까지만 표시 (UI 보호)
-            
-            with all_cols[i]:
-                with st.container(border=True):
-                    m_week_data = week_df[week_df['MACHNO'] == mach]
+        st.write("🔍 분석할 설비를 선택하면 AI 모델이 로드됩니다.")
+        selected_monitor_mach = st.radio(
+            "관제 대상 설비 선택", 
+            all_mach_list, 
+            horizontal=True,
+            key="monitor_mach_selector"
+        )
+
+        if selected_monitor_mach:
+            with st.status(f"🤖 {selected_monitor_mach} 설비 모델 로드 및 분석 중...", expanded=False) as status:
+                single_model_info = load_single_machine_model(selected_monitor_mach)
+                
+                if single_model_info:
+                    # 함수 요구 형식에 맞춰 래핑
+                    temp_models_dict = {selected_monitor_mach: single_model_info}
+                    m_week_data = week_df[week_df['MACHNO'] == selected_monitor_mach]
                     
-                    st.markdown(f"### {mach}")
+                    res = get_machine_status(selected_monitor_mach, m_week_data, temp_models_dict)
+                    status.update(label=f"✅ {selected_monitor_mach} 분석 완료", state="complete")
                     
-                    status = get_machine_status(mach, m_week_data, models_dict)
+                    # 결과 출력 UI
+                    col_res1, col_res2 = st.columns([1, 2])
+                    with col_res1:
+                        with st.container(border=True):
+                            if isinstance(res, dict):
+                                color = "#e74c3c" if "위험" in res['판정'] else "#2ecc71"
+                                st.markdown(f"### {selected_monitor_mach}")
+                                st.markdown(f"<h1 style='text-align: center; color: {color};'>{res['판정']}</h1>", unsafe_allow_html=True)
+                                st.metric("현재 위험도", f"{res['위험도']:.1%}")
+                                st.caption(f"🕒 최종 데이터: {res['시간']}")
+                            else:
+                                st.error(f"분석 오류: {res}")
                     
-                    if isinstance(status, dict):
-                        color = "red" if "위험" in status['판정'] else "green"
-                        st.markdown(f"<h2 style='text-align: center; color: {color};'>{status['판정']}</h2>", unsafe_allow_html=True)
-                        st.metric("현재 위험도", f"{status['위험도']:.1%}")
-                        st.caption(f"🕒 최종: {status['시간']}")
-                    elif status == "empty":
-                        st.warning("데이터 없음")
-                    else:
-                        st.error("분석 불가")
+                    with col_res2:
+                        st.write(f"📊 {selected_monitor_mach} 주요 판단 근거 (Top 5)")
+                        try:
+                            # 모델 및 피처 정보 추출
+                            model_obj = single_model_info['model']
+                            trained_feats = single_model_info['features']
+                            
+                            if hasattr(model_obj, 'feature_importances_'):
+                                importances = model_obj.feature_importances_
+                                # 피처와 중요도 매핑 (Polynomial 등으로 늘어난 경우 대비)
+                                feat_imp_df = pd.DataFrame({
+                                    'Feature': trained_feats[:len(importances)],
+                                    'Importance': importances[:len(trained_feats)]
+                                }).sort_values('Importance', ascending=True).tail(5)
+
+                                fig_imp = px.bar(
+                                    feat_imp_df, x='Importance', y='Feature', 
+                                    orientation='h', color='Importance',
+                                    color_continuous_scale='Reds' if "위험" in res['판정'] else 'Blues',
+                                    text_auto='.3f'
+                                )
+                                fig_imp.update_layout(
+                                    height=250, margin=dict(t=0, b=0, l=0, r=0),
+                                    showlegend=False, coloraxis_showscale=False,
+                                    xaxis_title="기여도 (Weight)", yaxis_title=None
+                                )
+                                st.plotly_chart(fig_imp, use_container_width=True)
+                                st.caption("💡 AI가 현재 시점에서 불량 가능성을 판단할 때 가장 중요하게 평가한 공정 변수입니다.")
+                            else:
+                                st.info("현재 모델은 세부 판단 근거(Feature Importance)를 지원하지 않습니다.")
+                        except Exception as e:
+                            st.info(f"판단 근거 시각화 중 알 수 없는 오류가 발생했습니다.")
+                else:
+                    st.error(f"❌ {selected_monitor_mach} 설비의 모델 파일을 찾을 수 없습니다.")
     else:
         st.error("최근 7일간의 데이터를 찾을 수 없습니다.")
 
@@ -506,6 +559,7 @@ with tab_analysis:
             st.warning("분석할 공정 데이터 컬럼을 찾을 수 없습니다.")
     else:
         st.success(f"✅ {label}에는 불량 데이터가 없습니다.")
+
 
 
 
