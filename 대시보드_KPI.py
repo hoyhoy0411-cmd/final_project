@@ -54,17 +54,49 @@ def download_from_gdrive(file_id, output_path):
 
 # --- 6. [수정] 설비별 모델 로드 및 캐싱 함수 ---
 # 메모리 절약을 위해 max_entries를 설정하여 필요한 모델만 메모리에 올립니다.
-@st.cache_resource(max_entries=1) 
+@st.cache_resource(max_entries=5) 
 def load_single_machine_model(mach_no):
     file_id = MACHINE_MODEL_CONFIG.get(mach_no)
     if not file_id:
         return None
     
     model_path = f"model_{mach_no}.pkl"
-    # 다운로드 성공 시 joblib으로 로드
-    if download_from_gdrive(file_id, model_path):
-        return joblib.load(model_path)
-    return None
+    
+    # 1. 파일 다운로드 로직 (중복 다운로드 방지)
+    if not os.path.exists(model_path):
+        url = f'https://drive.google.com/uc?id={file_id}'
+        try:
+            # gdown 실행 시 오류가 나면 None을 반환하여 캐시에 저장되지 않게 함
+            output = gdown.download(url, model_path, quiet=True)
+            if output is None:
+                return None
+        except Exception as e:
+            st.error(f"모델 파일 다운로드 중 오류 발생 ({mach_no}): {e}")
+            return None
+    
+    # 2. 모델 로드 및 CPU 강제 설정
+    try:
+        # mmap_mode='r'을 사용하면 메모리 사용량을 줄이고 로딩 속도를 높일 수 있습니다.
+        model_info = joblib.load(model_path)
+        
+        # XGBoost 또는 다른 모델이 GPU 설정을 가지고 있을 경우 CPU로 강제 전환
+        # 이 과정이 로드 직후에 수행되어야 무한 로딩을 방지할 수 있습니다.
+        if isinstance(model_info, dict) and 'model' in model_info:
+            target_model = model_info['model']
+            if hasattr(target_model, 'set_params'):
+                try:
+                    target_model.set_params(device="cpu", n_jobs=1)
+                except:
+                    pass
+        return model_info
+        
+    except Exception as e:
+        st.error(f"모델 로드 실패 ({mach_no}): {e}")
+        # 로드 실패 시 손상된 파일일 수 있으므로 삭제 (다음 실행 시 재다운로드 유도)
+        if os.path.exists(model_path):
+            os.remove(model_path)
+        return None
+
 
 def get_all_models_for_monitoring(mach_list):
     """실시간 관제 센터(Tab 1)에서 여러 설비를 한꺼번에 분석할 때 사용"""
@@ -563,6 +595,7 @@ with tab_analysis:
             st.warning("분석할 공정 데이터 컬럼을 찾을 수 없습니다.")
     else:
         st.success(f"✅ {label}에는 불량 데이터가 없습니다.")
+
 
 
 
