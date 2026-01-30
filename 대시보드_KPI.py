@@ -169,13 +169,15 @@ def get_machine_status(mach, m_week_data, models_dict):
 
         # 5. 스케일링 및 예측
         X_scaled = info['scaler'].transform(X_final)
-        
-        # XGBoost 장치 설정 (CPU 호환성)
-        if hasattr(info['model'], 'set_params'):
-            try: info['model'].set_params(device="cpu")
-            except: pass
-            
-        prob = info['model'].predict_proba(X_scaled)[0, 1]
+        model_obj = info['model']
+        if hasattr(model_obj, 'set_params'):
+            try:
+                # 학습 환경과 상관없이 현재 실행 환경(CPU)에 맞춤
+                model_obj.set_params(device="cpu", updater="grow_quantile_histmaker")
+            except:
+                pass
+                
+        prob = model_obj.predict_proba(X_scaled)[0, 1]
         
         # 6. 이상치 점수(LOF) 반영 (선택 사항)
         d_score = info['lof'].predict(X_scaled)[0]
@@ -410,7 +412,7 @@ with tab_kpi:
                                     showlegend=False, coloraxis_showscale=False,
                                     xaxis_title="기여도 (Weight)", yaxis_title=None
                                 )
-                                st.plotly_chart(fig_imp, use_container_width=True)
+                                st.plotly_chart(fig_imp, width='stretch')
                                 st.caption("💡 AI가 현재 시점에서 불량 가능성을 판단할 때 가장 중요하게 평가한 공정 변수입니다.")
                             else:
                                 st.info("현재 모델은 세부 판단 근거(Feature Importance)를 지원하지 않습니다.")
@@ -559,6 +561,7 @@ with tab_analysis:
             st.warning("분석할 공정 데이터 컬럼을 찾을 수 없습니다.")
     else:
         st.success(f"✅ {label}에는 불량 데이터가 없습니다.")
+
 
 
 
