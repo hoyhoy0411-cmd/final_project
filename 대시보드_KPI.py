@@ -10,34 +10,65 @@ import warnings
 from sklearn.exceptions import InconsistentVersionWarning
 from io import BytesIO
 import requests
+import urllib3
+import os
+import gdown
 
-warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
+# --- 1. 경고 및 보안 설정 ---
+# SSL 경고(InsecureRequestWarning) 제거
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+warnings.filterwarnings("ignore")
 
-# --- 구글 드라이브 파일 ID 설정 ---
+# --- 구글 드라이브 설정 ---
+def get_drive_url(file_id):
+    return f"https://docs.google.com/uc?export=download&id={file_id}"
+
 FILE_IDS = {
-    "models": "1ozTrBdUE-4fq-wghLSCInzzuXHtVcmTc",
-    "shot_data": "1f_hVACgK9030zpHjiw4huE2ZV4xRcbY_",
-    "preprocessed": "1_eROsCEx2FR6cbOOBi-d07xb2wWuXcsy",
-    "classification": "11nuPSVeJSFEk5E3wMkFn-lnTaY9p7Vlt"
+    "models": "1ozTrBdUE-4fq-wghLSCInzzuXHtVcmTc", 
+    "shot_data": "11nuPSVeJSFEk5E3wMkFn-lnTaY9p7Vlt" # 키 이름 통일
 }
 
-def get_drive_url(file_id):
-    return f'https://drive.google.com/uc?id={file_id}'
+PREPROCESSED_PATH = "전처리데이터.parquet"
+SHOT_DATA_PATH = "대시보드_샷별.parquet"
 
+def download_file(file_id, output_name):
+    """구글 드라이브에서 파일을 다운로드하여 로컬에 저장하는 함수"""
+    url = f'https://drive.google.com/uc?id={file_id}'
+    
+    # 파일이 이미 존재하면 다운로드를 건너뜁니다 (중복 다운로드 방지)
+    if not os.path.exists(output_name):
+        try:
+            with st.spinner(f'구글 드라이브에서 모델 다운로드 중...'):
+                # gdown은 대용량 파일의 '확인' 절차를 자동으로 처리합니다.
+                gdown.download(url, output_name, quiet=False)
+        except Exception as e:
+            st.error(f"다운로드 실패: {e}")
+            return None
+    return output_name
 
-# --- 라이브러리 없이 직접 분석하는 함수 (대체 로직) ---
+@st.cache_data
+def get_base_data():
+    """파일 전체를 한 번만 읽어오는 기본 함수"""
+    if not os.path.exists(SHOT_DATA_PATH):
+        st.error("파일이 존재하지 않습니다.")
+        return pd.DataFrame()
+    df = pd.read_parquet(SHOT_DATA_PATH, engine='pyarrow')
+    df.columns = [c.strip() for c in df.columns]
+    df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'], errors='coerce')
+    df = df.dropna(subset=['Timestamp_사출'])
+    return df
+
 @st.cache_resource
-def load_all_models():
+def load_all_models(): # 함수 이름 통일
+    """저장된 파일로부터 모델 객체를 로드"""
     try:
-        url = get_drive_url(FILE_IDS["models"])
-        response = requests.get(url)
-        # response.content를 BytesIO로 감싸서 joblib으로 전달 (현재 코드와 동일하지만 확인 필수)
-        model_file = BytesIO(response.content)
-        data = joblib.load(model_file)
-        return data
+        # 키 이름을 FILE_IDS['models']로 수정
+        file_path = download_file(FILE_IDS['models'], 'injection_models.pkl')
+        if file_path and os.path.exists(file_path):
+            return joblib.load(file_path)
+        return {}
     except Exception as e:
-        # 에러 메시지를 더 구체적으로 찍어서 확인
-        st.error(f"모델 파일 로드 상세 에러: {e}")
+        st.error(f"⚠️ 모델 파일 로드 실패: {e}")
         return {}
     
 def get_realtime_status_with_ai(full_df, models_dict):
@@ -124,14 +155,30 @@ st.set_page_config(page_title="공정 품질 KPI 대시보드", layout="wide")
 
 # --- 3. 데이터 로드 함수 (캐싱 적용) ---
 @st.cache_data
+@st.cache_data
 def load_latest_week_data():
     try:
-        url = get_drive_url(FILE_IDS["preprocessed"])
-        df = pd.read_csv(url)
-        df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'])
+        # 파일 존재 여부 확인 후 읽기
+        if not os.path.exists(PREPROCESSED_PATH):
+            return pd.DataFrame(), None, None
+            
+        df = pd.read_parquet(PREPROCESSED_PATH, engine='pyarrow')
+        df.columns = [c.strip() for c in df.columns]
+        
+        if 'Timestamp_사출' not in df.columns:
+            return pd.DataFrame(), None, None
+
+        df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'], errors='coerce')
+        df = df.dropna(subset=['Timestamp_사출'])
+        df['Date'] = df['Timestamp_사출'].dt.date # Date 생성
+        
         latest_date = df['Timestamp_사출'].max()
+        if pd.isna(latest_date):
+            return pd.DataFrame(), None, None
+            
         start_date = (latest_date - pd.Timedelta(days=6)).replace(hour=0, minute=0, second=0)
         week_df = df[(df['Timestamp_사출'] >= start_date) & (df['Timestamp_사출'] <= latest_date)].copy()
+        
         return week_df, start_date.date(), latest_date.date()
     except Exception as e:
         st.error(f"주간 데이터 로드 실패: {e}")
@@ -194,12 +241,12 @@ def get_machine_status(mach, day_df, _models_dict):
 @st.cache_data
 def load_process_data():
     try:
-        # 파일명을 '대시보드_샷별.csv' 혹은 GitHub에 올린 실제 파일명으로 일치시키세요.
-        # 한글 깨짐 방지를 위해 encoding='utf-8-sig' 추가
-        df = pd.read_csv('대시보드_샷별.csv', encoding='utf-8-sig') 
-        df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'])
+        content = download_file_from_google_drive(FILE_IDS["shot_data"])
+        df = pd.read_parquet(BytesIO(content)) # read_csv -> read_parquet
+        df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'], errors='coerce')
         return df
-    except:
+    except Exception as e:
+        st.error(f"❌ 데이터 로딩 실패: {e}")
         return pd.DataFrame()
 
 # 데이터 로드 실행
@@ -207,43 +254,49 @@ def load_process_data():
 # 1. 월 목록만 가져오는 가벼운 함수를 따로 만듭니다.
 @st.cache_data
 def get_available_months():
-    """월 목록만 가볍게 가져오기"""
     try:
-        url = get_drive_url(FILE_IDS["shot_data"])
-        # 전체를 다 읽지 않고 필요한 컬럼만 읽기
-        df_temp = pd.read_csv(url, usecols=['Timestamp_사출'], encoding='utf-8-sig')
-        return sorted(pd.to_datetime(df_temp['Timestamp_사출']).dt.strftime('%Y-%m').unique(), reverse=True)
+        # [수정] SHOT_DATA_PATH("대시보드_샷별.parquet")를 사용하도록 변경
+        df_full = pd.read_parquet(SHOT_DATA_PATH, columns=['Timestamp_사출'], engine='pyarrow')
+        df_full['Timestamp_사출'] = pd.to_datetime(df_full['Timestamp_사출'], errors='coerce')
+        df_full = df_full.dropna(subset=['Timestamp_사출'])
+        return sorted(df_full['Timestamp_사출'].dt.strftime('%Y-%m').unique(), reverse=True)
     except Exception as e:
-        st.error(f"월 목록 로드 실패: {e}")
+        st.error(f"📅 월 목록 로드 실패: {e}")
         return []
 
 @st.cache_data
 def load_data_by_month(selected_month):
-    """선택된 월의 데이터만 읽어오기"""
-    try:
-        url = get_drive_url(FILE_IDS["shot_data"])
-        df = pd.read_csv(url) 
-        df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'])
-        df['YearMonth'] = df['Timestamp_사출'].dt.strftime('%Y-%m')
+    df = get_base_data()
+    if df.empty: return pd.DataFrame(), pd.DataFrame()
+    
+    df['YearMonth'] = df['Timestamp_사출'].dt.strftime('%Y-%m')
+    current_date = pd.to_datetime(selected_month + "-01")
+    last_month_str = (current_date - pd.offsets.MonthBegin(1)).strftime('%Y-%m')
+    
+    # Result 컬럼 생성 로직 보강
+    if 'NG' in df.columns and 'Result' not in df.columns:
+        df['Result'] = df['NG'].map({0: '정상(OK)', 1: '불량(NG)'}) # 0, 1 매핑 확인 필요
         
-        df = df[df['YearMonth'] == selected_month].copy()
-        df['Date'] = df['Timestamp_사출'].dt.date 
-        df['NG'] = df['NG'].astype(str)
-        df['Result'] = df['NG'].apply(lambda x: '불량(NG)' if x in ['1', '1.0', 'NG'] else '정상(OK)')
-        return df
-    except Exception as e:
-        st.error(f"데이터 로드 실패: {e}")
-        return pd.DataFrame()
+    curr_df = df[df['YearMonth'] == selected_month].copy()
+    last_df = df[df['YearMonth'] == last_month_str].copy()
+    return curr_df, last_df
 
 def load_recent_process_data(n_per_machine=50):
     try:
-        url = get_drive_url(FILE_IDS["preprocessed"])
-        df = pd.read_csv(url)
-        df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'])
-        recent_df = df.sort_values('Timestamp_사출').groupby('MACHNO').tail(n_per_machine)
+        # 깃허브에 탑재된 전처리 parquet 파일을 직접 읽습니다.
+        df = pd.read_parquet(PREPROCESSED_PATH, engine='pyarrow')
+        df.columns = [c.strip() for c in df.columns]
+        
+        if 'Timestamp_사출' not in df.columns:
+            st.error(f"❌ '전처리데이터.parquet'에 'Timestamp_사출' 컬럼이 없습니다.")
+            return pd.DataFrame()
+            
+        df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'], errors='coerce')
+        # 설비별 최신 n건만 필터링하는 로직 (성능 최적화)
+        recent_df = df.groupby('MACHNO').tail(n_per_machine).copy()
         return recent_df
     except Exception as e:
-        st.error(f"실시간 데이터 로드 실패: {e}")
+        st.error(f"🚨 실시간 전처리 데이터 로드 실패: {e}")
         return pd.DataFrame()
 
 # ==========================================
@@ -257,7 +310,7 @@ month_list = get_available_months()
 selected_month = st.sidebar.selectbox("📅 분석 월 선택", month_list, key="sb_month")
 
 # 데이터 로드 실행 (선택된 월에 따라)
-df_filtered_month = load_data_by_month(selected_month)
+df_filtered_month, df_last_month = load_data_by_month(selected_month)
 models_dict = load_all_models()
 # 실시간 관제를 위해 설비별 최신 데이터 n건 로드
 full_df = load_recent_process_data(50) 
@@ -287,7 +340,6 @@ tab_kpi, tab_detail, tab_analysis = st.tabs(["🚀 공장 전체 KPI", "🔍 설
 with tab_kpi:
     st.title("🚀 공정 품질 핵심 성과 지표 (KPI)")
     st.info(f"📍 **{selected_month}** 공장 전체 설비 가동 현황 요약")
-
     # [1] 핵심 메트릭 (전월 대비 증감)
     try:
         current_date = pd.to_datetime(selected_month + "-01")
@@ -357,8 +409,14 @@ with tab_kpi:
         compare_machines = st.multiselect("비교 대상 설비", options=machine_list, default=[selected_machine])
         
         if compare_machines:
-            df_compare = df_filtered_month[df_filtered_month['MACHNO'].isin(compare_machines)]
-            trend_compare = df_compare.groupby(['Date', 'MACHNO']).size().reset_index(name='Count')
+            df_compare = df_filtered_month[df_filtered_month['MACHNO'].isin(compare_machines)].copy()
+    
+            # [수정] Date 컬럼 생성 보장
+            if 'Timestamp_사출' in df_compare.columns:
+                df_compare['Date'] = df_compare['Timestamp_사출'].dt.date
+            
+                # 이제 groupby 실행
+                trend_compare = df_compare.groupby(['Date', 'MACHNO']).size().reset_index(name='Count')
             
             fig_compare = px.line(trend_compare, x='Date', y='Count', color='MACHNO', markers=True)
             fig_compare.update_layout(height=400, margin=dict(t=30), 
@@ -384,25 +442,26 @@ with tab_kpi:
         
         for i, mach in enumerate(all_mach_list):
             with all_cols[i]:
-                # 설비별 테두리 컨테이너
                 with st.container(border=True):
-                    # 해당 설비의 7일치 데이터
+                    # 해당 설비 데이터 필터링
                     m_week_data = week_df[week_df['MACHNO'] == mach]
                     
-                    # 최신 상태 분석 (기존 함수 활용)
-                    status = get_machine_status(mach, week_df, models_dict)
-                    
                     st.markdown(f"### {mach}")
+                    
+                    # 데이터가 없는 경우 처리
+                    if m_week_data.empty:
+                        st.warning("데이터 없음")
+                        continue # 다음 설비로 넘어감
+
+                    # 최신 상태 분석 호출
+                    status = get_machine_status(mach, m_week_data, models_dict)
                     
                     if isinstance(status, dict):
                         color = "red" if "위험" in status['판정'] else "green"
                         st.markdown(f"<h2 style='text-align: center; color: {color};'>{status['판정']}</h2>", unsafe_allow_html=True)
-                        
-                        # 추가 정보: 주간 가동 샷 수
-                        weekly_shots = len(m_week_data)
                         st.metric("현재 위험도", f"{status['위험도']:.1%}")
-                        st.caption(f"📊 주간 생산량: {weekly_shots:,} 샷")
-                        st.caption(f"🕒 최종 업데이트: {status['시간']}")
+                        st.caption(f"📊 주간 생산량: {len(m_week_data):,}")
+                        st.caption(f"🕒 최종: {status['시간']}")
                     
                     elif status == "empty":
                         st.warning("데이터 없음")
@@ -445,6 +504,9 @@ with tab_detail:
 
     with c2:
         st.write(f"##### 📈 일별 생산 추이")
+        # [보완] m_df에 Date 컬럼이 확실히 있도록 생성
+        if 'Timestamp_사출' in m_df.columns:
+            m_df['Date'] = m_df['Timestamp_사출'].dt.date
         daily_prod = m_df.groupby(['Date', 'Result']).size().reset_index(name='Count')
         fig_line_prod = px.line(daily_prod, x='Date', y='Count', color='Result',
                                 color_discrete_map={'정상(OK)': '#2ecc71', '불량(NG)': '#e74c3c'},
@@ -561,3 +623,4 @@ with tab_analysis:
     else:
 
         st.success(f"✅ {label}에는 불량 데이터가 없습니다.")
+
