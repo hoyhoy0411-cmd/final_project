@@ -19,239 +19,201 @@ warnings.filterwarnings("ignore")
 st.set_page_config(page_title="공정 품질 KPI 대시보드", layout="wide")
 
 # --- 3. 상수 및 경로 설정 ---
-PREPROCESSED_PATH = "전처리데이터.parquet"
-SHOT_DATA_PATH = "대시보드_샷별.parquet"
-MODEL_PATH = "injection_models.pkl"
-
-FILE_IDS = {
-    "models": "1ozTrBdUE-4fq-wghLSCInzzuXHtVcmTc", 
-    "shot_data": "19Lh5DFCkl-RO0myqYTJWsBffJSxPwVR3", 
-    "preprocessed": "1_s_tXukPRANC7wsfk0nv5k8HQB1Exby6"
+MONTHLY_CONFIG = {
+    "2023-09": {
+        "shot": "1ed7eRVk25aTBN1aVsvzEZZQrbGPN0lbY",
+        "pre": "1rw9Kv055wD1w_HLO1Pdizbk4CEfHAeiF"
+    },
+    "2023-10": {
+        "shot": "1gYE2xh6TcrtlNd6rAYe0MrjOmkTvz9vL",
+        "pre": "12ZKLaEUw09JGno05isB7QQW_zMRicl-l"
+    },
+    "2023-11": {
+        "shot": "1QPNxQffDP3F22KjyXhcORSxgY_jYha96",
+        "pre": "1xaObr2lANjOsHENGkslUqNiHOuHEaVFb"
+    }
 }
 
+MODEL_FILE_ID = "1ozTrBdUE-4fq-wghLSCInzzuXHtVcmTc"
+MODEL_PATH = "injection_models.pkl"
+
 # --- 4. 파일 다운로드 함수 ---
-def download_file(file_id, output_name, display_text):
-    """구글 드라이브에서 파일을 다운로드하여 로컬에 저장하는 함수"""
-    url = f'https://drive.google.com/uc?id={file_id}'
-    
-    # 파일이 이미 존재하면 다운로드 건너뜀 (속도 향상)
-    if not os.path.exists(output_name):
+def download_from_gdrive(file_id, output_path):
+    if not os.path.exists(output_path):
+        url = f'https://drive.google.com/uc?id={file_id}'
         try:
-            with st.spinner(f'📥 데이터 로드 중: {display_text}...'):
-                gdown.download(url, output_name, quiet=False)
+            gdown.download(url, output_path, quiet=True)
         except Exception as e:
-            st.error(f"❌ 다운로드 실패 ({display_text}): {e}")
-            return None
-    return output_name
+            st.error(f"다운로드 실패: {e}")
+            return False
+    return True
 
-# --- 5. 앱 시작 시 데이터 다운로드 실행 ---
-# 파일이 없으면 다운로드하고, 있으면 넘어갑니다.
-download_file(FILE_IDS['models'], MODEL_PATH, "AI 분석 모델")
-download_file(FILE_IDS['shot_data'], SHOT_DATA_PATH, "메인 공정 데이터")
-download_file(FILE_IDS['preprocessed'], PREPROCESSED_PATH, "실시간 전처리 데이터")
-
-
-# --- 6. 데이터 로드 및 캐싱 함수 ---
-
-@st.cache_data
-def get_base_data():
-    """메인 공정 데이터를 읽어오는 함수"""
-    if not os.path.exists(SHOT_DATA_PATH):
-        st.error("데이터 파일이 로컬에 존재하지 않습니다.")
-        return pd.DataFrame()
-    
-    try:
-        df = pd.read_parquet(SHOT_DATA_PATH, engine='pyarrow')
-        df.columns = [c.strip() for c in df.columns]
-        df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'], errors='coerce')
-        df = df.dropna(subset=['Timestamp_사출'])
-        return df
-    except Exception as e:
-        st.error(f"파일 읽기 오류: {e}")
-        return pd.DataFrame()
+# --- [수정] 6. 데이터 로드 및 캐싱 함수 ---
 
 @st.cache_resource
-def load_all_models():
-    """저장된 파일로부터 모델 객체를 로드 (다운로드는 이미 완료됨)"""
-    try:
-        if os.path.exists(MODEL_PATH):
-            return joblib.load(MODEL_PATH)
-        else:
-            st.warning("⚠️ 모델 파일이 없습니다.")
-            return {}
-    except Exception as e:
-        st.error(f"⚠️ 모델 파일 로드 실패: {e}")
-        return {}
+def load_ai_models():
+    download_from_gdrive(MODEL_FILE_ID, MODEL_PATH)
+    if os.path.exists(MODEL_PATH):
+        return joblib.load(MODEL_PATH)
+    return {}
 
 @st.cache_data
-def load_latest_week_data():
-    """실시간 관제용 최근 1주일 데이터 로드"""
-    try:
-        if not os.path.exists(PREPROCESSED_PATH):
-            return pd.DataFrame(), None, None
-            
-        df = pd.read_parquet(PREPROCESSED_PATH, engine='pyarrow')
-        df.columns = [c.strip() for c in df.columns]
-        
-        if 'Timestamp_사출' not in df.columns:
-            return pd.DataFrame(), None, None
+def load_monthly_data(year_month):
+    config = MONTHLY_CONFIG.get(year_month)
+    if not config: return pd.DataFrame(), pd.DataFrame()
 
-        df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'], errors='coerce')
-        df = df.dropna(subset=['Timestamp_사출'])
-        df['Date'] = df['Timestamp_사출'].dt.date
-        
-        latest_date = df['Timestamp_사출'].max()
-        if pd.isna(latest_date):
-            return pd.DataFrame(), None, None
-            
-        start_date = (latest_date - pd.Timedelta(days=6)).replace(hour=0, minute=0, second=0)
-        week_df = df[(df['Timestamp_사출'] >= start_date) & (df['Timestamp_사출'] <= latest_date)].copy()
-        
-        return week_df, start_date.date(), latest_date.date()
-    except Exception as e:
-        st.error(f"주간 데이터 로드 실패: {e}")
-        return pd.DataFrame(), None, None
+    shot_file = f"shot_{year_month}.parquet"
+    pre_file = f"pre_{year_month}.parquet"
 
-@st.cache_data
-def load_recent_process_data(n_per_machine=50):
-    """설비별 최신 데이터 로드 (실시간 시뮬레이션용)"""
+    download_from_gdrive(config['shot'], shot_file)
+    download_from_gdrive(config['pre'], pre_file)
+
     try:
-        if not os.path.exists(PREPROCESSED_PATH):
-            return pd.DataFrame()
-            
-        df = pd.read_parquet(PREPROCESSED_PATH, engine='pyarrow')
-        df.columns = [c.strip() for c in df.columns]
+        df_shot = pd.read_parquet(shot_file)
+        df_pre = pd.read_parquet(pre_file)
         
-        if 'Timestamp_사출' not in df.columns:
-            return pd.DataFrame()
+        # 전처리
+        for df in [df_shot, df_pre]:
+            df.columns = [c.strip() for c in df.columns]
+            if 'Timestamp_사출' in df.columns:
+                df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'], errors='coerce')
+        
+        if 'Result' not in df_shot.columns and 'NG' in df_shot.columns:
+            df_shot['Result'] = df_shot['NG'].map({0: '정상(OK)', 1: '불량(NG)'})
             
-        df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'], errors='coerce')
-        # 설비별 최신 n건만 필터링
-        recent_df = df.groupby('MACHNO').tail(n_per_machine).copy()
-        return recent_df
+        return df_shot, df_pre
     except Exception as e:
-        st.error(f"🚨 실시간 전처리 데이터 로드 실패: {e}")
+        st.error(f"데이터 로드 실패: {e}")
+        return pd.DataFrame(), pd.DataFrame()
+
+# --- [수정] 7. 실시간 관제용 로직 (현재 로드된 데이터 활용) ---
+def get_recent_7days_status(df_pre):
+    """별도 파일 읽기 없이 현재 로드된 전처리 데이터에서 최근 7일을 추출"""
+    if df_pre.empty:
         return pd.DataFrame()
-
-@st.cache_data
-def get_available_months():
-    """사용 가능한 월 목록 추출"""
-    try:
-        if not os.path.exists(SHOT_DATA_PATH):
-            return []
-            
-        df_full = pd.read_parquet(SHOT_DATA_PATH, columns=['Timestamp_사출'], engine='pyarrow')
-        df_full['Timestamp_사출'] = pd.to_datetime(df_full['Timestamp_사출'], errors='coerce')
-        df_full = df_full.dropna(subset=['Timestamp_사출'])
-        return sorted(df_full['Timestamp_사출'].dt.strftime('%Y-%m').unique(), reverse=True)
-    except Exception as e:
-        st.error(f"📅 월 목록 로드 실패: {e}")
-        return []
-
-@st.cache_data
-def load_data_by_month(selected_month):
-    """선택된 월의 데이터 필터링"""
-    df = get_base_data()
-    if df.empty: return pd.DataFrame(), pd.DataFrame()
     
-    df['YearMonth'] = df['Timestamp_사출'].dt.strftime('%Y-%m')
-    
-    # 전월 계산
-    current_date = pd.to_datetime(selected_month + "-01")
-    last_month_str = (current_date - pd.offsets.MonthBegin(1)).strftime('%Y-%m')
-    
-    # Result 컬럼 생성
-    if 'NG' in df.columns and 'Result' not in df.columns:
-        df['Result'] = df['NG'].map({0: '정상(OK)', 1: '불량(NG)'})
-        
-    curr_df = df[df['YearMonth'] == selected_month].copy()
-    last_df = df[df['YearMonth'] == last_month_str].copy()
-    return curr_df, last_df
+    latest_date = df_pre['Timestamp_사출'].max()
+    start_date = latest_date - pd.Timedelta(days=6)
+    return df_pre[df_pre['Timestamp_사출'] >= start_date].copy()
 
-# --- 7. 상태 판정 로직 (AI 모델 활용) ---
-def get_machine_status(mach, day_df, _models_dict): 
-    if _models_dict is None or len(_models_dict) == 0:
-        return "no_model"
-    if day_df.empty or mach not in _models_dict:
+# --- [수정] 7. 실시간 관제용 로직 (모델 딕셔너리 구조 반영) ---
+
+def get_machine_status(mach, m_week_data, models_dict):
+    """
+    설비별 AI 모델(Scaler + Model + Features)을 사용하여 
+    실제 데이터 기반 위험도를 판정합니다.
+    """
+    if m_week_data.empty:
         return "empty"
     
-    m_data = day_df[day_df['MACHNO'] == mach].sort_values('Timestamp_사출')
-    if m_data.empty: 
-        return "empty"
-    
-    info = _models_dict[mach]
     try:
-        # 특징 추출 및 전처리
-        X_input = m_data[info['features']].tail(1).values.astype(np.float32)
+        # 1. 설비에 해당하는 모델 정보(dict) 가져오기
+        mach_key = str(mach)
+        if not models_dict or mach_key not in models_dict:
+            return "error (No Model)"
         
-        expected_features = info['scaler'].n_features_in_
-        current_features = X_input.shape[1]
+        info = models_dict[mach_key]
+        trained_features = info['features']
         
-        if current_features < expected_features:
-            padding_size = expected_features - current_features
-            padding = np.zeros((1, padding_size), dtype=np.float32)
-            X_final = np.hstack([X_input, padding])
+        # 2. 최신 데이터 1건 추출 및 피처 구성
+        latest_row = m_week_data.sort_values('Timestamp_사출').iloc[-1]
+        
+        # 학습 당시 사용한 피처 리스트와 동일하게 구성
+        X_input = pd.DataFrame([latest_row])
+        X = pd.DataFrame(index=[0])
+        for col in trained_features:
+            X[col] = X_input[col] if col in X_input.columns else 0
+        X = X.fillna(0)
+
+        # 3. 잔차(Residual) 계산 (최근 데이터가 1건이므로 이전 데이터 필요)
+        # 관제용 로직을 위해 m_week_data 전체를 활용해 잔차를 구함
+        X_week = m_week_data[trained_features].copy()
+        X_res_full = X_week - X_week.rolling(window=10, min_periods=1).mean()
+        X_res_latest = X_res_full.iloc[-1:] # 마지막 행 잔차
+        X_res_latest.columns = [f"{c}_resid" for c in X_res_latest.columns]
+        
+        # 데이터 결합 (원본 + 잔차)
+        X_combined = pd.concat([X.reset_index(drop=True), X_res_latest.reset_index(drop=True)], axis=1)
+
+        # 4. Polynomial Features (G06 및 난조군 특수 로직)
+        if mach_key == 'G06':
+            poly = PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)
+            top_cols = [c for c in X.columns if any(s in c for s in ['금형온도', '최소쿠션', '충진시간', '압력'])][:6]
+            X_poly = poly.fit_transform(X_combined[top_cols])
+            X_final = np.hstack([X_combined.values, X_poly])
+        elif info.get('group') == '난조군':
+            poly = PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)
+            top_cols = [c for c in X.columns if any(s in c for s in ['금형온도', '최소쿠션', '충진시간'])][:5]
+            X_poly = poly.fit_transform(X_combined[top_cols])
+            X_final = np.hstack([X_combined.values, X_poly])
         else:
-            X_final = X_input[:, :expected_features]
+            X_final = X_combined.values
 
+        # 5. 스케일링 및 예측
         X_scaled = info['scaler'].transform(X_final)
         
-        model = info['model']
-        # XGBoost CPU 설정 (호환성)
-        if hasattr(model, 'get_booster'):
-            try:
-                model.get_booster().set_param({'predictor': 'cpu_predictor', 'device': 'cpu'})
-            except:
-                pass
-        
-        probs = model.predict_proba(X_scaled)[:, 1][0]
-        
-        # LOF(이상탐지) 반영
-        d_score = info['lof'].predict(X_scaled)[0]
-        if d_score == 1: 
-            probs *= info.get('lof_penalty', 1.0)
+        # XGBoost 장치 설정 (CPU 호환성)
+        if hasattr(info['model'], 'set_params'):
+            try: info['model'].set_params(device="cpu")
+            except: pass
             
-        is_anomaly = probs >= info.get('threshold', 0.5)
-        last_time = m_data['Timestamp_사출'].iloc[-1].strftime('%H:%M:%S')
+        prob = info['model'].predict_proba(X_scaled)[0, 1]
         
-        return {
-            "판정": "🚨 위험" if is_anomaly else "🟢 정상",
-            "위험도": probs,
-            "시간": last_time
-        }
-    except Exception as e:
-        return f"error: {str(e)}"
+        # 6. 이상치 점수(LOF) 반영 (선택 사항)
+        d_score = info['lof'].predict(X_scaled)[0]
+        if d_score == 1: # 이상치인 경우 페널티 부여
+            prob *= info.get('lof_penalty', 1.0)
+            prob = min(prob, 1.0) # 100% 초과 방지
 
+        # 7. 상태 및 색상 결정
+        threshold = info.get('threshold', 0.5)
+        status_label = "정상"
+        if prob >= threshold:
+            status_label = "위험(발생)"
+        elif prob >= threshold * 0.7:
+            status_label = "주의"
+
+        return {
+            "판정": status_label,
+            "위험도": prob,
+            "시간": latest_row['Timestamp_사출'].strftime('%m/%d %H:%M')
+        }
+        
+    except Exception as e:
+        return f"error ({str(e)})"
+    
 # ==========================================
 # 8. 메인 실행부 (UI 구성)
 # ==========================================
 st.sidebar.title("🛠️ 공정 필터링")
 
 # 월 목록 로드 및 선택
-month_list = get_available_months()
-if not month_list:
-    st.error("데이터 파일에 유효한 날짜 데이터가 없습니다.")
-    st.stop()
-
-selected_month = st.sidebar.selectbox("📅 분석 월 선택", month_list, key="sb_month")
+month_list = sorted(list(MONTHLY_CONFIG.keys()), reverse=True)
+selected_month = st.sidebar.selectbox("📅 분석 월 선택", month_list)
 
 # 데이터 로드
-df_filtered_month, df_last_month = load_data_by_month(selected_month)
-models_dict = load_all_models()
+df_shot, df_pre = load_monthly_data(selected_month)
+models_dict = load_ai_models()
+
+# 전월 데이터 로드 (KPI 비교용)
+current_idx = month_list.index(selected_month)
+if current_idx + 1 < len(month_list):
+    df_last_month, _ = load_monthly_data(month_list[current_idx + 1])
+else:
+    df_last_month = pd.DataFrame()
+
+# 변수명 통일 (중요!)
+df_filtered_month = df_shot  
+df_final = df_shot
 
 # 세션 스테이트 관리
-if 'df' not in st.session_state or st.session_state.get('current_month') != selected_month:
-    st.session_state['df'] = df_filtered_month
-    st.session_state['current_month'] = selected_month
-
-df_final = st.session_state['df']
+df_final = df_shot
 
 # 설비 선택 사이드바
-if not df_final.empty:
-    machine_list = sorted(df_final['MACHNO'].unique().tolist())
-    selected_machine = st.sidebar.selectbox("🏭 상세 분석 설비 (기준)", machine_list, key="sb_machine")
+if not df_shot.empty:
+    machine_list = sorted(df_shot['MACHNO'].unique().tolist())
+    selected_machine = st.sidebar.selectbox("🏭 상세 분석 설비", machine_list)
 else:
-    st.sidebar.warning("선택한 월에 데이터가 없습니다.")
     st.stop()
 
 # 탭 구성
@@ -329,18 +291,26 @@ with tab_kpi:
             
                 trend_compare = df_compare.groupby(['Date', 'MACHNO']).size().reset_index(name='Count')
                 fig_compare = px.line(trend_compare, x='Date', y='Count', color='MACHNO', markers=True)
-                fig_compare.update_layout(height=400, margin=dict(t=30), 
-                                          xaxis=dict(tickformat="%d일", dtick=86400000.0),
-                                          legend=dict(orientation="h", y=1.1))
+                fig_compare.update_layout(
+                    height=400, 
+                    margin=dict(t=30), 
+                    xaxis=dict(
+                        tickformat="%d일",           # 표시 형식: 01일, 05일...
+                        dtick=86400000.0 * 5,       # 1일을 밀리초로 환산한 값에 5를 곱함 (5일 간격)
+                        tickangle=0                 # 글자가 겹치지 않도록 수평 유지
+                    ),
+                    legend=dict(orientation="h", y=1.1)
+                )
                 st.plotly_chart(fig_compare, width='stretch')
 
     # [3] 실시간 관제 센터
     st.divider()
     st.subheader("🏭 실시간 설비 이상 징후 관제 센터 (최근 7일)")
 
-    week_df, start_day, end_day = load_latest_week_data()
-
+    week_df = get_recent_7days_status(df_pre) # 새로 만든 함수 사용
     if not week_df.empty:
+        start_day = week_df['Timestamp_사출'].min().date()
+        end_day = week_df['Timestamp_사출'].max().date()
         st.write(f"📅 **관제 기간:** {start_day} ~ {end_day} (최근 7일간)")
         
         all_mach_list = sorted(week_df['MACHNO'].unique())
@@ -512,5 +482,6 @@ with tab_analysis:
             st.warning("분석할 공정 데이터 컬럼을 찾을 수 없습니다.")
     else:
         st.success(f"✅ {label}에는 불량 데이터가 없습니다.")
+
 
 
