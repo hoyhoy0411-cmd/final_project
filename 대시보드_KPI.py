@@ -534,55 +534,6 @@ with tab_detail:
         fig_line.update_layout(height=400, xaxis=dict(tickformat="%d일"), yaxis_title="불량률(%)")
         st.plotly_chart(fig_line, width='stretch')
 
-# ==============================================================================
-# TAB 3: 불량 원인 분석
-# ==============================================================================
-with tab_analysis:
-    st.subheader("🚨 불량(NG) 데이터 특성 상세 분석")
-    
-    available_dates = ["전체(해당 월)"] + sorted(m_df['Date'].unique().astype(str).tolist(), reverse=True)
-    selected_date_analysis = st.selectbox("📅 분석 기간 선택", available_dates, key="analysis_date")
-
-    if selected_date_analysis == "전체(해당 월)":
-        target_df = m_df
-        label = "이번 달 전체"
-    else:
-        target_df = m_df[m_df['Date'].astype(str) == selected_date_analysis]
-        label = selected_date_analysis
-
-    m_ng_df = target_df[target_df['Result'] == '불량(NG)']
-    m_ok_df = target_df[target_df['Result'] == '정상(OK)']
-
-    if not m_ng_df.empty:
-        st.markdown(f"**{label}** 기준, 불량 데이터 **{len(m_ng_df)}건** 분석")
-        
-        analyze_cols = ['Cycle Time', '사출 시간', '충진 시간', '최소 쿠션', '피크압_주성분', '보압 완료 위치']
-        valid_cols = [c for c in analyze_cols if c in m_df.columns]
-        
-        if valid_cols:
-            ng_mean = m_ng_df[valid_cols].mean()
-            ok_mean = m_ok_df[valid_cols].mean() if not m_ok_df.empty else m_df[valid_cols].mean()
-
-            cols = st.columns(len(valid_cols))
-            for i, col in enumerate(valid_cols):
-                diff = ng_mean[col] - ok_mean[col]
-                cols[i].metric(col, f"{ng_mean[col]:.2f}", f"{diff:+.2f}", delta_color="inverse")
-
-            st.write("#### 🕸️ 정상 대비 변동 비율 (%)")
-            ratios = [(ng_mean[c] / ok_mean[c] * 100) if ok_mean[c] != 0 else 0 for c in valid_cols]
-            
-            r_data = ratios + [ratios[0]]
-            theta_data = valid_cols + [valid_cols[0]]
-            fig_radar = go.Figure()
-            fig_radar.add_trace(go.Scatterpolar(r=r_data, theta=theta_data, fill='toself', name='불량 특성'))
-            fig_radar.add_trace(go.Scatterpolar(r=[100]*len(theta_data), theta=theta_data, 
-                                                line=dict(dash='dash', color='green'), name='정상 기준'))
-            fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True)), height=450)
-            st.plotly_chart(fig_radar, width='stretch')
-        else:
-            st.warning("분석할 공정 데이터 컬럼을 찾을 수 없습니다.")
-    else:
-        st.success(f"✅ {label}에는 불량 데이터가 없습니다.")
 
 
 
