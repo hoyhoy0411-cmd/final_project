@@ -95,8 +95,20 @@ def load_monthly_data(year_month):
     download_from_gdrive(config['pre'], pre_file)
 
     try:
+        # 1. 특정 컬럼만 읽어오기 (메모리 절약의 핵심)
+        # 만약 모든 컬럼이 필요하지 않다면 columns=[...] 인자를 추가하세요.
         df_shot = pd.read_parquet(shot_file)
         df_pre = pd.read_parquet(pre_file)
+        
+        # --- [추가] 2. 데이터 타입 최적화 (Downcasting) ---
+        for df in [df_shot, df_pre]:
+            # 실수형(float64 -> float32) 최적화
+            fcols = df.select_dtypes('float64').columns
+            df[fcols] = df[fcols].astype('float32')
+            
+            # 정수형(int64 -> int32) 최적화
+            icols = df.select_dtypes('int64').columns
+            df[icols] = df[icols].astype('int32')
         
         # 전처리
         for df in [df_shot, df_pre]:
@@ -571,6 +583,7 @@ with tab_analysis:
             st.warning("분석할 공정 데이터 컬럼을 찾을 수 없습니다.")
     else:
         st.success(f"✅ {label}에는 불량 데이터가 없습니다.")
+
 
 
 
