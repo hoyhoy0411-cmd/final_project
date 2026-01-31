@@ -27,16 +27,16 @@ MONTHLY_CONFIG = {
 
 # [추가] 설비별 모델 파일 ID 매핑
 MACHINE_MODEL_CONFIG = {
-    "D01": "1E7PwqwTu64FJjqWOIYWrodfC6migkKbR",
-    "D10": "1GYsZXdCLc7izqYag6gQ40q81CiQN7WBR",
-    "F09": "1yPlNAUEatopQbHqv1BInnD4qP3sRRzBZ",
-    "F11": "1uTdb1Z9L04sJYq93KO0zXuk1VJWQWZ9Y",
-    "G01": "1zHx1w2GPF902iz3eKMziy34NuLMu1adG",
-    "G02": "1_xQvj0l2hcCcuDrisQxJZ5Mss6Fep96k",
-    "G03": "1sDcIxxQ1MwXIyXfDq-3t6tkDwMePY46t",
-    "G05": "17jPNOz-SeLwh9bRd8kDrsPcsGmBCXFAS",
-    "G06": "1dF_ZCpJsXTFK16JXFKx5PbFYNqHF1p1o",
-    "G10": "1LsTOoSUSUPqqx_088wv8YvHl9RUDbvR9"
+    "D01": "1XtLNvXTkOg-JBGlF76729iuKRw7gxvVG",
+    "D10": "1s7vEiK6qSKuVIjVHddxFXsGepzGGZohY",
+    "F09": "1bOsfbLrFzmGv0hGa8ZeEB61XvSs_AkOh",
+    "F11": "1AeG63xYORXHoXx6nBqxjEOmgwPPwSibj",
+    "G01": "1x2YRLraNr8Sd_9gs7VabgVrpewhHBFR6",
+    "G02": "1Z45nLz0JoriOABrJeSRw0arJYT6LwV7o",
+    "G03": "1O5k6WiJh6c4khEyMOaCzrv4s0SRC9Zha",
+    "G05": "1k0UspBOMjSTEa3O-zjmmooJNdJOYiN40",
+    "G06": "1H-1LAhSTc2KsQ5IfkjahIYYgf5FAXdXh",
+    "G10": "1AAOQXHC5LFrhQnR8pgmiNjOqYzsY6Sly"
 }
 
 # --- 4. 파일 다운로드 함수 ---
@@ -54,7 +54,7 @@ def download_from_gdrive(file_id, output_path):
 
 # --- 6. [수정] 설비별 모델 로드 및 캐싱 함수 ---
 # 메모리 절약을 위해 max_entries를 설정하여 필요한 모델만 메모리에 올립니다.
-@st.cache_resource(max_entries=5) 
+@st.cache_resource(max_entries=5) # 1에서 5로 증가 (G01로 돌아올 때 즉시 로드됨)
 def load_single_machine_model(mach_no):
     file_id = MACHINE_MODEL_CONFIG.get(mach_no)
     if not file_id:
@@ -62,40 +62,16 @@ def load_single_machine_model(mach_no):
     
     model_path = f"model_{mach_no}.pkl"
     
-    # 1. 파일 다운로드 로직 (중복 다운로드 방지)
+    # [개선] 파일이 이미 존재하면 gdown을 아예 호출하지 않음 (네트워크 대기 방지)
     if not os.path.exists(model_path):
         url = f'https://drive.google.com/uc?id={file_id}'
         try:
-            # gdown 실행 시 오류가 나면 None을 반환하여 캐시에 저장되지 않게 함
-            output = gdown.download(url, model_path, quiet=True)
-            if output is None:
-                return None
+            gdown.download(url, model_path, quiet=True)
         except Exception as e:
-            st.error(f"모델 파일 다운로드 중 오류 발생 ({mach_no}): {e}")
+            st.error(f"다운로드 실패: {e}")
             return None
-    
-    # 2. 모델 로드 및 CPU 강제 설정
-    try:
-        # mmap_mode='r'을 사용하면 메모리 사용량을 줄이고 로딩 속도를 높일 수 있습니다.
-        model_info = joblib.load(model_path)
-        
-        # XGBoost 또는 다른 모델이 GPU 설정을 가지고 있을 경우 CPU로 강제 전환
-        # 이 과정이 로드 직후에 수행되어야 무한 로딩을 방지할 수 있습니다.
-        if isinstance(model_info, dict) and 'model' in model_info:
-            target_model = model_info['model']
-            if hasattr(target_model, 'set_params'):
-                try:
-                    target_model.set_params(device="cpu", n_jobs=1)
-                except:
-                    pass
-        return model_info
-        
-    except Exception as e:
-        st.error(f"모델 로드 실패 ({mach_no}): {e}")
-        # 로드 실패 시 손상된 파일일 수 있으므로 삭제 (다음 실행 시 재다운로드 유도)
-        if os.path.exists(model_path):
-            os.remove(model_path)
-        return None
+            
+    return joblib.load(model_path)
 
 
 def get_all_models_for_monitoring(mach_list):
@@ -136,21 +112,15 @@ def load_monthly_data(year_month):
         st.error(f"데이터 로드 실패: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
-# --- [수정] 관제 센터용 데이터 로직 (Tail 적용) ---
+# --- [수정] 7. 실시간 관제용 로직 (현재 로드된 데이터 활용) ---
 def get_recent_7days_status(df_pre):
+    """별도 파일 읽기 없이 현재 로드된 전처리 데이터에서 최근 7일을 추출"""
     if df_pre.empty:
         return pd.DataFrame()
     
-    # 1. 일단 최신 7일 데이터를 가져오되
     latest_date = df_pre['Timestamp_사출'].max()
     start_date = latest_date - pd.Timedelta(days=6)
-    week_df = df_pre[df_pre['Timestamp_사출'] >= start_date].copy()
-    
-    # 2. 성능 테스트를 위해 각 설비별로 가장 최근 '100건'만 남깁니다 (Tail 추출)
-    # 데이터가 너무 많아 연산이 밀리는 것을 방지합니다.
-    week_df = week_df.groupby('MACHNO').tail(100).reset_index(drop=True)
-    
-    return week_df
+    return df_pre[df_pre['Timestamp_사출'] >= start_date].copy()
 
 # --- [수정] 7. 실시간 관제용 로직 (모델 딕셔너리 구조 반영) ---
 
@@ -468,11 +438,7 @@ with tab_kpi:
 # ==============================================================================
 with tab_detail:
     st.markdown(f"### 🔍 {selected_machine} 설비 정밀 분석 리포트")
-    
-    # 해당 설비 데이터 중 가장 최근 200건만 가져와서 시각화/분석 진행
-    m_df_full = df_filtered_month[df_filtered_month['MACHNO'] == selected_machine].sort_values('Timestamp_사출')
-    m_df = m_df_full.tail(200) # 전체 데이터 대신 Tail(200건)만 사용하여 메모리 보호
-    
+    m_df = df_filtered_month[df_filtered_month['MACHNO'] == selected_machine].sort_values('Timestamp_사출')
     if 'Timestamp_사출' in m_df.columns:
         m_df['Date'] = m_df['Timestamp_사출'].dt.date
 
@@ -605,6 +571,7 @@ with tab_analysis:
             st.warning("분석할 공정 데이터 컬럼을 찾을 수 없습니다.")
     else:
         st.success(f"✅ {label}에는 불량 데이터가 없습니다.")
+
 
 
 
