@@ -2,11 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-import numpy as np
-import joblib
-from sklearn.preprocessing import PolynomialFeatures
 import warnings
-import requests
 import urllib3
 import os
 import gdown
@@ -15,28 +11,15 @@ import gdown
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 warnings.filterwarnings("ignore")
 
-# --- 2. 페이지 설정 (가장 먼저 실행되어야 함) ---
+# --- 2. 페이지 설정 ---
 st.set_page_config(page_title="공정 품질 KPI 대시보드", layout="wide")
 
 # --- 3. 상수 및 경로 설정 ---
+# 관제 로직 제거로 'pre' 데이터는 필요 없어져서 로드하지 않도록 최적화했습니다.
 MONTHLY_CONFIG = {
-    "2023-09": {"shot": "1ed7eRVk25aTBN1aVsvzEZZQrbGPN0lbY", "pre": "1rw9Kv055wD1w_HLO1Pdizbk4CEfHAeiF"},
-    "2023-10": {"shot": "1gYE2xh6TcrtlNd6rAYe0MrjOmkTvz9vL", "pre": "12ZKLaEUw09JGno05isB7QQW_zMRicl-l"},
-    "2023-11": {"shot": "1QPNxQffDP3F22KjyXhcORSxgY_jYha96", "pre": "1xaObr2lANjOsHENGkslUqNiHOuHEaVFb"}
-}
-
-# [추가] 설비별 모델 파일 ID 매핑
-MACHINE_MODEL_CONFIG = {
-    "D01": "1XtLNvXTkOg-JBGlF76729iuKRw7gxvVG",
-    "D10": "1s7vEiK6qSKuVIjVHddxFXsGepzGGZohY",
-    "F09": "1bOsfbLrFzmGv0hGa8ZeEB61XvSs_AkOh",
-    "F11": "1AeG63xYORXHoXx6nBqxjEOmgwPPwSibj",
-    "G01": "1x2YRLraNr8Sd_9gs7VabgVrpewhHBFR6",
-    "G02": "1Z45nLz0JoriOABrJeSRw0arJYT6LwV7o",
-    "G03": "1O5k6WiJh6c4khEyMOaCzrv4s0SRC9Zha",
-    "G05": "1k0UspBOMjSTEa3O-zjmmooJNdJOYiN40",
-    "G06": "1H-1LAhSTc2KsQ5IfkjahIYYgf5FAXdXh",
-    "G10": "1AAOQXHC5LFrhQnR8pgmiNjOqYzsY6Sly"
+    "2023-09": "1ed7eRVk25aTBN1aVsvzEZZQrbGPN0lbY",
+    "2023-10": "1gYE2xh6TcrtlNd6rAYe0MrjOmkTvz9vL",
+    "2023-11": "1QPNxQffDP3F22KjyXhcORSxgY_jYha96"
 }
 
 # --- 4. 파일 다운로드 함수 ---
@@ -50,140 +33,92 @@ def download_from_gdrive(file_id, output_path):
             return False
     return True
 
-# --- [수정] 6. 데이터 로드 및 캐싱 함수 ---
-
-# --- 6. [수정] 설비별 모델 로드 및 캐싱 함수 ---
-# 메모리 절약을 위해 max_entries를 설정하여 필요한 모델만 메모리에 올립니다.
-@st.cache_resource(max_entries=5) # 1에서 5로 증가 (G01로 돌아올 때 즉시 로드됨)
-def load_single_machine_model(mach_no):
-    file_id = MACHINE_MODEL_CONFIG.get(mach_no)
-    if not file_id:
-        return None
-    
-    model_path = f"model_{mach_no}.pkl"
-    
-    # [개선] 파일이 이미 존재하면 gdown을 아예 호출하지 않음 (네트워크 대기 방지)
-    if not os.path.exists(model_path):
-        url = f'https://drive.google.com/uc?id={file_id}'
-        try:
-            gdown.download(url, model_path, quiet=True)
-        except Exception as e:
-            st.error(f"다운로드 실패: {e}")
-            return None
-            
-    return joblib.load(model_path)
-
-
-def get_all_models_for_monitoring(mach_list):
-    """실시간 관제 센터(Tab 1)에서 여러 설비를 한꺼번에 분석할 때 사용"""
-    models = {}
-    for m in mach_list:
-        mdl = load_single_machine_model(m)
-        if mdl:
-            models[m] = mdl
-    return models
-
+# --- 5. 데이터 로드 및 캐싱 함수 (최적화 적용) ---
 @st.cache_data
 def load_monthly_data(year_month):
-    config = MONTHLY_CONFIG.get(year_month)
-    if not config: return pd.DataFrame(), pd.DataFrame()
+    file_id = MONTHLY_CONFIG.get(year_month)
+    if not file_id: 
+        return pd.DataFrame()
 
     shot_file = f"shot_{year_month}.parquet"
-    pre_file = f"pre_{year_month}.parquet"
-
-    download_from_gdrive(config['shot'], shot_file)
-    download_from_gdrive(config['pre'], pre_file)
+    
+    # 다운로드
+    download_from_gdrive(file_id, shot_file)
 
     try:
-        # 1. 특정 컬럼만 읽어오기 (메모리 절약의 핵심)
-        # 만약 모든 컬럼이 필요하지 않다면 columns=[...] 인자를 추가하세요.
-        df_shot = pd.read_parquet(shot_file)
-        df_pre = pd.read_parquet(pre_file)
+        # 데이터 로드
+        df = pd.read_parquet(shot_file)
         
-        # --- [추가] 2. 데이터 타입 최적화 (Downcasting) ---
-        for df in [df_shot, df_pre]:
-            # 실수형(float64 -> float32) 최적화
-            fcols = df.select_dtypes('float64').columns
-            df[fcols] = df[fcols].astype('float32')
+        # [메모리 최적화 1] 컬럼명 공백 제거 및 날짜 변환
+        df.columns = [c.strip() for c in df.columns]
+        if 'Timestamp_사출' in df.columns:
+            df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'], errors='coerce')
+        
+        # [메모리 최적화 2] 수치형 데이터 다운캐스팅 (64bit -> 32bit)
+        fcols = df.select_dtypes('float64').columns
+        df[fcols] = df[fcols].astype('float32')
+        
+        icols = df.select_dtypes('int64').columns
+        df[icols] = df[icols].astype('int32')
+
+        # [메모리 최적화 3] 범주형 데이터 변환 (Object -> Category)
+        # 반복되는 문자열(설비명, 결과 등)을 카테고리로 변환하면 메모리가 대폭 감소합니다.
+        for col in ['MACHNO', 'Result', 'NG']:
+            if col in df.columns:
+                df[col] = df[col].astype('category')
+
+        # Result 컬럼 생성 (없을 경우)
+        if 'Result' not in df.columns and 'NG' in df.columns:
+            # map 사용 시 category 구조 유지를 위해 주의 필요하나, 여기선 단순 처리
+            temp_result = df['NG'].map({0: '정상(OK)', 1: '불량(NG)'})
+            df['Result'] = temp_result.astype('category')
             
-            # 정수형(int64 -> int32) 최적화
-            icols = df.select_dtypes('int64').columns
-            df[icols] = df[icols].astype('int32')
-        
-        # 전처리
-        for df in [df_shot, df_pre]:
-            df.columns = [c.strip() for c in df.columns]
-            if 'Timestamp_사출' in df.columns:
-                df['Timestamp_사출'] = pd.to_datetime(df['Timestamp_사출'], errors='coerce')
-        
-        if 'Result' not in df_shot.columns and 'NG' in df_shot.columns:
-            df_shot['Result'] = df_shot['NG'].map({0: '정상(OK)', 1: '불량(NG)'})
-            
-        return df_shot, df_pre
+        return df
     except Exception as e:
         st.error(f"데이터 로드 실패: {e}")
-        return pd.DataFrame(), pd.DataFrame()
-    
+        return pd.DataFrame()
+
 # ==========================================
-# --- 8. 메인 실행부 (UI 구성) ---
+# --- 6. 메인 실행부 (UI 구성) ---
 st.sidebar.title("🛠️ 공정 필터링")
 
-# 1. 월 선택 (기존 코드 유지)
+# 1. 월 선택
 raw_month_list = sorted(list(MONTHLY_CONFIG.keys()), reverse=True)
-latest_month_key = raw_month_list[0] # 가장 최신월 (2023-11)
-
-# 내부 키와 표시용 이름을 매핑 (2023-XX를 2025년 XX월로 치환)
 display_month_map = {
     m: m.replace("2023-", "2025년 ").replace("-", "") + "월" 
     for m in raw_month_list
 }
 
-# 사용자에게는 '2025년 11월'로 보여줌
 selected_display_month = st.sidebar.selectbox(
     "📅 분석 월 선택", 
     options=list(display_month_map.values())
 )
-
-# 실제 데이터 로드에 사용할 키 추출 (예: 2023-11)
 selected_month = [k for k, v in display_month_map.items() if v == selected_display_month][0]
 
-# 2. 분석용 데이터 로드 (사이드바 선택에 따라 바뀜)
-df_shot, df_pre = load_monthly_data(selected_month)
+# 2. 데이터 로드 (shot 데이터만 로드)
+df_shot = load_monthly_data(selected_month)
 
-# [추가] 설비 리스트 및 선택 로직 (필요함)
-machine_list = sorted(df_shot['MACHNO'].unique().tolist()) if not df_shot.empty else []
-selected_machine = st.sidebar.selectbox("🏗️ 분석 대상 설비", options=machine_list) if machine_list else None
+if df_shot.empty:
+    st.error("데이터를 불러올 수 없습니다.")
+    st.stop()
 
-# [수정] 실시간 관제 전용 데이터 로드
-if selected_month == latest_month_key:
-    df_pre_for_monitor = df_pre
-else:
-    _, df_pre_for_monitor = load_monthly_data(latest_month_key)
+# 3. 설비 선택
+machine_list = sorted(df_shot['MACHNO'].unique().tolist())
+selected_machine = st.sidebar.selectbox("🏗️ 분석 대상 설비", options=machine_list)
 
-# 3. 관제 센터용 데이터 (df_pre_for_monitor를 명시적으로 사용)
-week_df = get_recent_7days_status(df_pre_for_monitor)
-
-if not week_df.empty:
-    current_machs = sorted(week_df['MACHNO'].unique().tolist())
-    models_dict = get_all_models_for_monitoring(current_machs)
-else:
-    models_dict = {}
-
-# 5. 상세 분석용 모델 로드 (선택된 1개 설비)
-# --- 데이터 변수명 통일 및 전월 데이터 로드 ---
-df_filtered_month = df_shot  # KPI 계산에 사용되는 메인 변수
-
-# 전월 데이터 로드 (KPI 비교용)
+# 4. 전월 데이터 로드 (KPI 비교용, 선택사항)
 current_idx = raw_month_list.index(selected_month)
 if current_idx + 1 < len(raw_month_list):
     last_month_key = raw_month_list[current_idx + 1]
-    df_last_month = load_monthly_data(last_month_key)[0]
+    df_last_month = load_monthly_data(last_month_key)
 else:
     df_last_month = pd.DataFrame()
 
-df_final = df_shot # 하단 품질 진단 로직용
+# --- 데이터 준비 ---
+df_filtered_month = df_shot
+df_final = df_shot
 
-# 탭 구성
+# 탭 구성 (관제 센터 탭 제거됨)
 tab_kpi, tab_detail, tab_analysis = st.tabs(["🚀 공장 전체 KPI", "🔍 설비 상세 리포트", "🚨 불량 원인 분석"])
 
 # ==============================================================================
@@ -232,7 +167,8 @@ with tab_kpi:
     
     with col_a:
         st.subheader("📊 설비별 불량률 순위")
-        m_stats = df_filtered_month.groupby('MACHNO')['Result'].value_counts().unstack(fill_value=0)
+        # value_counts는 category 타입에서 매우 빠름
+        m_stats = df_filtered_month.groupby('MACHNO', observed=True)['Result'].value_counts().unstack(fill_value=0)
         for col in ['불량(NG)', '정상(OK)']:
             if col not in m_stats.columns: m_stats[col] = 0
         
@@ -256,96 +192,15 @@ with tab_kpi:
             if 'Timestamp_사출' in df_compare.columns:
                 df_compare['Date'] = df_compare['Timestamp_사출'].dt.date
             
-                trend_compare = df_compare.groupby(['Date', 'MACHNO']).size().reset_index(name='Count')
+                trend_compare = df_compare.groupby(['Date', 'MACHNO'], observed=True).size().reset_index(name='Count')
                 fig_compare = px.line(trend_compare, x='Date', y='Count', color='MACHNO', markers=True)
                 fig_compare.update_layout(
                     height=400, 
                     margin=dict(t=30), 
-                    xaxis=dict(
-                        tickformat="%d일",           # 표시 형식: 01일, 05일...
-                        dtick=86400000.0 * 5,       # 1일을 밀리초로 환산한 값에 5를 곱함 (5일 간격)
-                        tickangle=0                 # 글자가 겹치지 않도록 수평 유지
-                    ),
+                    xaxis=dict(tickformat="%d일", dtick=86400000.0 * 5, tickangle=0),
                     legend=dict(orientation="h", y=1.1)
                 )
                 st.plotly_chart(fig_compare, width='stretch')
-    # [3] 실시간 관제 센터
-    st.divider()
-    st.subheader("🏭 실시간 설비 이상 징후 관제 센터 (최근 7일)")
-    st.info(f"💡 현재 관제 센터는 **실시간 상태**를 유지하기 위해 선택 월과 무관하게 **최신 데이터({latest_month_key})**를 분석 중입니다.")
-    week_df = get_recent_7days_status(df_pre)
-    if not week_df.empty:
-        all_mach_list = sorted(week_df['MACHNO'].unique())
-        
-        st.write("🔍 분석할 설비를 선택하면 AI 모델이 로드됩니다.")
-        selected_monitor_mach = st.radio(
-            "관제 대상 설비 선택", 
-            all_mach_list, 
-            horizontal=True,
-            key="monitor_mach_selector"
-        )
-
-        if selected_monitor_mach:
-            with st.status(f"🤖 {selected_monitor_mach} 설비 모델 로드 및 분석 중...", expanded=False) as status:
-                single_model_info = load_single_machine_model(selected_monitor_mach)
-                
-                if single_model_info:
-                    # 함수 요구 형식에 맞춰 래핑
-                    temp_models_dict = {selected_monitor_mach: single_model_info}
-                    m_week_data = week_df[week_df['MACHNO'] == selected_monitor_mach]
-                    
-                    res = get_machine_status(selected_monitor_mach, m_week_data, temp_models_dict)
-                    status.update(label=f"✅ {selected_monitor_mach} 분석 완료", state="complete")
-                    
-                    # 결과 출력 UI
-                    col_res1, col_res2 = st.columns([1, 2])
-                    with col_res1:
-                        with st.container(border=True):
-                            if isinstance(res, dict):
-                                color = "#e74c3c" if "위험" in res['판정'] else "#2ecc71"
-                                st.markdown(f"### {selected_monitor_mach}")
-                                st.markdown(f"<h1 style='text-align: center; color: {color};'>{res['판정']}</h1>", unsafe_allow_html=True)
-                                st.metric("현재 위험도", f"{res['위험도']:.1%}")
-                                st.caption(f"🕒 최종 데이터: {res['시간']}")
-                            else:
-                                st.error(f"분석 오류: {res}")
-                    
-                    with col_res2:
-                        st.write(f"📊 {selected_monitor_mach} 주요 판단 근거 (Top 5)")
-                        try:
-                            # 모델 및 피처 정보 추출
-                            model_obj = single_model_info['model']
-                            trained_feats = single_model_info['features']
-                            
-                            if hasattr(model_obj, 'feature_importances_'):
-                                importances = model_obj.feature_importances_
-                                # 피처와 중요도 매핑 (Polynomial 등으로 늘어난 경우 대비)
-                                feat_imp_df = pd.DataFrame({
-                                    'Feature': trained_feats[:len(importances)],
-                                    'Importance': importances[:len(trained_feats)]
-                                }).sort_values('Importance', ascending=True).tail(5)
-
-                                fig_imp = px.bar(
-                                    feat_imp_df, x='Importance', y='Feature', 
-                                    orientation='h', color='Importance',
-                                    color_continuous_scale='Reds' if "위험" in res['판정'] else 'Blues',
-                                    text_auto='.3f'
-                                )
-                                fig_imp.update_layout(
-                                    height=250, margin=dict(t=0, b=0, l=0, r=0),
-                                    showlegend=False, coloraxis_showscale=False,
-                                    xaxis_title="기여도 (Weight)", yaxis_title=None
-                                )
-                                st.plotly_chart(fig_imp, width='stretch')
-                                st.caption("💡 AI가 현재 시점에서 불량 가능성을 판단할 때 가장 중요하게 평가한 공정 변수입니다.")
-                            else:
-                                st.info("현재 모델은 세부 판단 근거(Feature Importance)를 지원하지 않습니다.")
-                        except Exception as e:
-                            st.info(f"판단 근거 시각화 중 알 수 없는 오류가 발생했습니다.")
-                else:
-                    st.error(f"❌ {selected_monitor_mach} 설비의 모델 파일을 찾을 수 없습니다.")
-    else:
-        st.error("최근 7일간의 데이터를 찾을 수 없습니다.")
 
 # ==============================================================================
 # TAB 2: 설비 상세 리포트
@@ -382,7 +237,7 @@ with tab_detail:
 
     with c2:
         st.write(f"##### 📈 일별 생산 추이")
-        daily_prod = m_df.groupby(['Date', 'Result']).size().reset_index(name='Count')
+        daily_prod = m_df.groupby(['Date', 'Result'], observed=True).size().reset_index(name='Count')
         fig_line_prod = px.line(daily_prod, x='Date', y='Count', color='Result',
                                 color_discrete_map={'정상(OK)': '#2ecc71', '불량(NG)': '#e74c3c'},
                                 markers=True)
@@ -415,7 +270,7 @@ with tab_detail:
         end_date = m_df['Date'].max()
         all_days = pd.date_range(start=start_date, end=end_date).date
         
-        daily_stats = m_df.groupby('Date')['Result'].value_counts().unstack(fill_value=0)
+        daily_stats = m_df.groupby('Date', observed=True)['Result'].value_counts().unstack(fill_value=0)
         if '불량(NG)' not in daily_stats.columns: daily_stats['불량(NG)'] = 0
         if '정상(OK)' not in daily_stats.columns: daily_stats['정상(OK)'] = 0
         
@@ -485,6 +340,7 @@ with tab_analysis:
             st.warning("분석할 공정 데이터 컬럼을 찾을 수 없습니다.")
     else:
         st.success(f"✅ {label}에는 불량 데이터가 없습니다.")
+
 
 
 
