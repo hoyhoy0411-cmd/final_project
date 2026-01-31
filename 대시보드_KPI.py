@@ -123,104 +123,6 @@ def load_monthly_data(year_month):
     except Exception as e:
         st.error(f"데이터 로드 실패: {e}")
         return pd.DataFrame(), pd.DataFrame()
-
-# --- [수정] 7. 실시간 관제용 로직 (현재 로드된 데이터 활용) ---
-def get_recent_7days_status(df_pre):
-    """별도 파일 읽기 없이 현재 로드된 전처리 데이터에서 최근 7일을 추출"""
-    if df_pre.empty:
-        return pd.DataFrame()
-    
-    latest_date = df_pre['Timestamp_사출'].max()
-    start_date = latest_date - pd.Timedelta(days=6)
-    return df_pre[df_pre['Timestamp_사출'] >= start_date].copy()
-
-# --- [수정] 7. 실시간 관제용 로직 (모델 딕셔너리 구조 반영) ---
-
-def get_machine_status(mach, m_week_data, models_dict):
-    """
-    설비별 AI 모델(Scaler + Model + Features)을 사용하여 
-    실제 데이터 기반 위험도를 판정합니다.
-    """
-    if m_week_data.empty:
-        return "empty"
-    
-    try:
-        # 1. 설비에 해당하는 모델 정보(dict) 가져오기
-        mach_key = str(mach)
-        if not models_dict or mach_key not in models_dict:
-            return "error (No Model)"
-        
-        info = models_dict[mach_key]
-        trained_features = info['features']
-        
-        # 2. 최신 데이터 1건 추출 및 피처 구성
-        latest_row = m_week_data.sort_values('Timestamp_사출').iloc[-1]
-        
-        # 학습 당시 사용한 피처 리스트와 동일하게 구성
-        X_input = pd.DataFrame([latest_row])
-        X = pd.DataFrame(index=[0])
-        for col in trained_features:
-            X[col] = X_input[col] if col in X_input.columns else 0
-        X = X.fillna(0)
-
-        # 3. 잔차(Residual) 계산 (최근 데이터가 1건이므로 이전 데이터 필요)
-        # 관제용 로직을 위해 m_week_data 전체를 활용해 잔차를 구함
-        X_week = m_week_data[trained_features].copy()
-        X_res_full = X_week - X_week.rolling(window=10, min_periods=1).mean()
-        X_res_latest = X_res_full.iloc[-1:] # 마지막 행 잔차
-        X_res_latest.columns = [f"{c}_resid" for c in X_res_latest.columns]
-        
-        # 데이터 결합 (원본 + 잔차)
-        X_combined = pd.concat([X.reset_index(drop=True), X_res_latest.reset_index(drop=True)], axis=1)
-
-        # 4. Polynomial Features (G06 및 난조군 특수 로직)
-        if mach_key == 'G06':
-            poly = PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)
-            top_cols = [c for c in X.columns if any(s in c for s in ['금형온도', '최소쿠션', '충진시간', '압력'])][:6]
-            X_poly = poly.fit_transform(X_combined[top_cols])
-            X_final = np.hstack([X_combined.values, X_poly])
-        elif info.get('group') == '난조군':
-            poly = PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)
-            top_cols = [c for c in X.columns if any(s in c for s in ['금형온도', '최소쿠션', '충진시간'])][:5]
-            X_poly = poly.fit_transform(X_combined[top_cols])
-            X_final = np.hstack([X_combined.values, X_poly])
-        else:
-            X_final = X_combined.values
-
-        # 5. 스케일링 및 예측
-        X_scaled = info['scaler'].transform(X_final)
-        model_obj = info['model']
-        if hasattr(model_obj, 'set_params'):
-            try:
-                # 학습 환경과 상관없이 현재 실행 환경(CPU)에 맞춤
-                model_obj.set_params(device="cpu", updater="grow_quantile_histmaker")
-            except:
-                pass
-                
-        prob = model_obj.predict_proba(X_scaled)[0, 1]
-        
-        # 6. 이상치 점수(LOF) 반영 (선택 사항)
-        d_score = info['lof'].predict(X_scaled)[0]
-        if d_score == 1: # 이상치인 경우 페널티 부여
-            prob *= info.get('lof_penalty', 1.0)
-            prob = min(prob, 1.0) # 100% 초과 방지
-
-        # 7. 상태 및 색상 결정
-        threshold = info.get('threshold', 0.5)
-        status_label = "정상"
-        if prob >= threshold:
-            status_label = "위험(발생)"
-        elif prob >= threshold * 0.7:
-            status_label = "주의"
-
-        return {
-            "판정": status_label,
-            "위험도": prob,
-            "시간": latest_row['Timestamp_사출'].strftime('%m/%d %H:%M')
-        }
-        
-    except Exception as e:
-        return f"error ({str(e)})"
     
 # ==========================================
 # --- 8. 메인 실행부 (UI 구성) ---
@@ -534,6 +436,55 @@ with tab_detail:
         fig_line.update_layout(height=400, xaxis=dict(tickformat="%d일"), yaxis_title="불량률(%)")
         st.plotly_chart(fig_line, width='stretch')
 
+# ==============================================================================
+# TAB 3: 불량 원인 분석
+# ==============================================================================
+with tab_analysis:
+    st.subheader("🚨 불량(NG) 데이터 특성 상세 분석")
+    
+    available_dates = ["전체(해당 월)"] + sorted(m_df['Date'].unique().astype(str).tolist(), reverse=True)
+    selected_date_analysis = st.selectbox("📅 분석 기간 선택", available_dates, key="analysis_date")
+
+    if selected_date_analysis == "전체(해당 월)":
+        target_df = m_df
+        label = "이번 달 전체"
+    else:
+        target_df = m_df[m_df['Date'].astype(str) == selected_date_analysis]
+        label = selected_date_analysis
+
+    m_ng_df = target_df[target_df['Result'] == '불량(NG)']
+    m_ok_df = target_df[target_df['Result'] == '정상(OK)']
+
+    if not m_ng_df.empty:
+        st.markdown(f"**{label}** 기준, 불량 데이터 **{len(m_ng_df)}건** 분석")
+        
+        analyze_cols = ['Cycle Time', '사출 시간', '충진 시간', '최소 쿠션', '피크압_주성분', '보압 완료 위치']
+        valid_cols = [c for c in analyze_cols if c in m_df.columns]
+        
+        if valid_cols:
+            ng_mean = m_ng_df[valid_cols].mean()
+            ok_mean = m_ok_df[valid_cols].mean() if not m_ok_df.empty else m_df[valid_cols].mean()
+
+            cols = st.columns(len(valid_cols))
+            for i, col in enumerate(valid_cols):
+                diff = ng_mean[col] - ok_mean[col]
+                cols[i].metric(col, f"{ng_mean[col]:.2f}", f"{diff:+.2f}", delta_color="inverse")
+
+            st.write("#### 🕸️ 정상 대비 변동 비율 (%)")
+            ratios = [(ng_mean[c] / ok_mean[c] * 100) if ok_mean[c] != 0 else 0 for c in valid_cols]
+            
+            r_data = ratios + [ratios[0]]
+            theta_data = valid_cols + [valid_cols[0]]
+            fig_radar = go.Figure()
+            fig_radar.add_trace(go.Scatterpolar(r=r_data, theta=theta_data, fill='toself', name='불량 특성'))
+            fig_radar.add_trace(go.Scatterpolar(r=[100]*len(theta_data), theta=theta_data, 
+                                                line=dict(dash='dash', color='green'), name='정상 기준'))
+            fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True)), height=450)
+            st.plotly_chart(fig_radar, width='stretch')
+        else:
+            st.warning("분석할 공정 데이터 컬럼을 찾을 수 없습니다.")
+    else:
+        st.success(f"✅ {label}에는 불량 데이터가 없습니다.")
 
 
 
