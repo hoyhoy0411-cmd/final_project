@@ -211,17 +211,44 @@ with tab_detail:
     if 'Timestamp_사출' in m_df.columns:
         m_df['Date'] = m_df['Timestamp_사출'].dt.date
 
-    # 설비 상세 메트릭
+    # --- [수정 시작] 설비 상세 메트릭 (전월 대비 증감 추가) ---
+    
+    # 1. 이번 달 지표 계산
     m_t = len(m_df)
     m_ng = len(m_df[m_df['Result'] == '불량(NG)'])
     m_ok = m_t - m_ng
     m_rate = (m_ng / m_t * 100) if m_t > 0 else 0
 
+    # 2. 전월 데이터 계산 (비교용)
+    has_m_history = False
+    lm_t, lm_ok, lm_ng, lm_rate = 0, 0, 0, 0
+
+    if not df_last_month.empty:
+        # 전월 데이터에서 현재 선택된 설비만 필터링
+        m_last_df = df_last_month[df_last_month['MACHNO'] == selected_machine]
+        
+        if not m_last_df.empty:
+            lm_t = len(m_last_df)
+            lm_ng = len(m_last_df[m_last_df['Result'] == '불량(NG)'])
+            lm_ok = lm_t - lm_ng
+            lm_rate = (lm_ng / lm_t * 100) if lm_t > 0 else 0
+            has_m_history = True
+
+    # 3. 메트릭 표시 (Delta 적용)
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("생산량", f"{m_t:,}건")
-    m2.metric("양품 수량", f"{m_ok:,}건")
-    m3.metric("불량 수량", f"{m_ng:,}건")
-    m4.metric("불량률", f"{m_rate:.2f}%")
+
+    if has_m_history:
+        m1.metric("생산량", f"{m_t:,}건", delta=f"{m_t - lm_t:,}건")
+        m2.metric("양품 수량", f"{m_ok:,}건", delta=f"{m_ok - lm_ok:,}건")
+        # 불량 수량과 불량률은 낮을수록 좋으므로 delta_color="inverse" (증가하면 빨강, 감소하면 초록)
+        m3.metric("불량 수량", f"{m_ng:,}건", delta=f"{m_ng - lm_ng:,}건", delta_color="inverse")
+        m4.metric("불량률", f"{m_rate:.2f}%", delta=f"{m_rate - lm_rate:.2f}%", delta_color="inverse")
+    else:
+        # 전월 데이터가 없을 경우 기존 방식대로 표시
+        m1.metric("생산량", f"{m_t:,}건")
+        m2.metric("양품 수량", f"{m_ok:,}건")
+        m3.metric("불량 수량", f"{m_ng:,}건")
+        m4.metric("불량률", f"{m_rate:.2f}%")
     
     st.write("")
 
@@ -280,7 +307,7 @@ with tab_detail:
         existing_days = daily_stats['Date'].tolist()
         missing_days = [d for d in all_days if d not in existing_days]
 
-        fig_line = px.line(daily_stats, x='Date', y='Rate', markers=True, text=daily_stats['Rate'].apply(lambda x: f'{x:.1f}%'))
+        fig_line = px.line(daily_stats, x='Date', y='Rate', markers=True, text=daily_stats['Rate'].apply(lambda x: f'{x:.1f}'))
         
         for m_day in missing_days:
             fig_line.add_vrect(x0=pd.to_datetime(m_day)-pd.Timedelta(hours=12),
