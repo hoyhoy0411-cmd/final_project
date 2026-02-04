@@ -80,7 +80,7 @@ def load_monthly_data(year_month):
 
 # ==========================================
 # --- 6. 메인 실행부 (UI 구성) ---
-st.sidebar.title("🛠️ 공정 필터링")
+st.sidebar.title(" 공정 필터링")
 
 # 1. 월 선택
 raw_month_list = sorted(list(MONTHLY_CONFIG.keys()), reverse=True)
@@ -90,7 +90,7 @@ display_month_map = {
 }
 
 selected_display_month = st.sidebar.selectbox(
-    "📅 분석 월 선택", 
+    " 분석 월 선택", 
     options=list(display_month_map.values())
 )
 selected_month = [k for k, v in display_month_map.items() if v == selected_display_month][0]
@@ -119,14 +119,14 @@ df_filtered_month = df_shot
 df_final = df_shot
 
 # 탭 구성 (관제 센터 탭 제거됨)
-tab_kpi, tab_detail, tab_analysis = st.tabs(["🚀 공장 전체 KPI", "🔍 설비 상세 리포트", "🚨 불량 원인 분석"])
+tab_kpi, tab_detail, tab_analysis = st.tabs([" 공장 전체 KPI", " 설비 상세 리포트", " 불량 원인 분석"])
 
 # ==============================================================================
 # TAB 1: 공장 전체 KPI
 # ==============================================================================
 with tab_kpi:
-    st.title("🚀 공정 품질 핵심 성과 지표 (KPI)")
-    st.info(f"📍 **{selected_month}** 공장 전체 설비 가동 현황 요약")
+    st.title(" 공정 품질 핵심 성과 지표 (KPI)")
+    st.info(f" 공장 전체 설비 가동 현황 요약")
     
     # [1] 핵심 메트릭
     total_qty = len(df_filtered_month)
@@ -166,7 +166,7 @@ with tab_kpi:
     col_a, col_b = st.columns(2)
     
     with col_a:
-        st.subheader("📊 설비별 불량률 순위")
+        st.subheader(" 설비별 불량률 순위")
         # value_counts는 category 타입에서 매우 빠름
         m_stats = df_filtered_month.groupby('MACHNO', observed=True)['Result'].value_counts().unstack(fill_value=0)
         for col in ['불량(NG)', '정상(OK)']:
@@ -184,7 +184,7 @@ with tab_kpi:
         st.plotly_chart(fig_rank, width='stretch')
 
     with col_b:
-        st.subheader("📉 설비별 생산량 추이 비교")
+        st.subheader(" 설비별 생산량 추이 비교")
         compare_machines = st.multiselect("비교 대상 설비", options=machine_list, default=[selected_machine])
         
         if compare_machines:
@@ -206,7 +206,7 @@ with tab_kpi:
 # TAB 2: 설비 상세 리포트
 # ==============================================================================
 with tab_detail:
-    st.markdown(f"### 🔍 {selected_machine} 설비 정밀 분석 리포트")
+    st.markdown(f"###  {selected_machine} 설비 정밀 분석 리포트")
     m_df = df_filtered_month[df_filtered_month['MACHNO'] == selected_machine].sort_values('Timestamp_사출')
     if 'Timestamp_사출' in m_df.columns:
         m_df['Date'] = m_df['Timestamp_사출'].dt.date
@@ -254,7 +254,7 @@ with tab_detail:
 
     c1, c2 = st.columns([1, 2.5])
     with c1:
-        st.write(f"##### 🍩 품질 비율")
+        st.write(f"#####  품질 비율")
         fig_pie = px.pie(m_df, names='Result', hole=0.6, color='Result',
                           color_discrete_map={'정상(OK)': '#2ecc71', '불량(NG)': '#e74c3c'})
         fig_pie.update_layout(height=300, showlegend=True, 
@@ -263,7 +263,7 @@ with tab_detail:
         st.plotly_chart(fig_pie, width='stretch')
 
     with c2:
-        st.write(f"##### 📈 일별 생산 추이")
+        st.write(f"#####  일별 생산 추이")
         daily_prod = m_df.groupby(['Date', 'Result'], observed=True).size().reset_index(name='Count')
         fig_line_prod = px.line(daily_prod, x='Date', y='Count', color='Result',
                                 color_discrete_map={'정상(OK)': '#2ecc71', '불량(NG)': '#e74c3c'},
@@ -283,14 +283,14 @@ with tab_detail:
     target_warn = p_avg * 1.5 * 100
     
     if m_rate <= p_avg * 100:
-        st.success(f"✅ **안정**: 불량률이 공장 평균({p_avg*100:.2f}%) 이하입니다.")
+        st.success(f" **안정**: 불량률이 공장 평균({p_avg*100:.2f}%) 이하입니다.")
     elif m_rate <= target_warn:
-        st.warning(f"⚠️ **주의**: 불량률이 공장 평균을 상회합니다.")
+        st.warning(f" **주의**: 불량률이 공장 평균을 상회합니다.")
     else:
-        st.error(f"🚨 **위험**: 불량률이 관리 한계를 초과했습니다.")
+        st.error(f" **위험**: 불량률이 관리 한계를 초과했습니다.")
 
     # 일별 불량률 추이
-    st.subheader("📈 일별 불량률 추이 (비가동 구간 포함)")
+    st.subheader(" 일별 불량률 추이 (비가동 구간 포함)")
     
     if not m_df.empty:
         start_date = m_df['Date'].min()
@@ -325,7 +325,7 @@ with tab_analysis:
     st.subheader("🚨 불량(NG) 데이터 특성 상세 분석")
     
     available_dates = ["전체(해당 월)"] + sorted(m_df['Date'].unique().astype(str).tolist(), reverse=True)
-    selected_date_analysis = st.selectbox("📅 분석 기간 선택", available_dates, key="analysis_date")
+    selected_date_analysis = st.selectbox(" 분석 기간 선택", available_dates, key="analysis_date")
 
     if selected_date_analysis == "전체(해당 월)":
         target_df = m_df
@@ -366,7 +366,8 @@ with tab_analysis:
         else:
             st.warning("분석할 공정 데이터 컬럼을 찾을 수 없습니다.")
     else:
-        st.success(f"✅ {label}에는 불량 데이터가 없습니다.")
+        st.success(f" {label}에는 불량 데이터가 없습니다.")
+
 
 
 
