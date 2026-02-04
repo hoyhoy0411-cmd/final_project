@@ -51,7 +51,7 @@ def load_csv_data():
 
 # --- 대시보드 메인 설정 ---
 st.set_page_config(page_title="AI 품질 정밀 진단", layout="wide")
-st.title("🏭 설비별 AI 품질 정밀 진단 & 시뮬레이터")
+st.title(" 설비별 AI 품질 정밀 진단 & 시뮬레이터")
 
 df = load_csv_data()
 
@@ -79,7 +79,7 @@ if df is not None:
                 st.sidebar.markdown("---")
                 st.sidebar.subheader("🛠️ 시뮬레이션 설정")
     
-                sim_threshold = st.sidebar.slider("🎯 판정 임계값 설정", 0.0, 1.0, fixed_threshold, 0.05)
+                sim_threshold = st.sidebar.slider(" 판정 임계값 설정", 0.0, 1.0, fixed_threshold, 0.05)
     
                 # 중요도 기반 상위 10개 변수 슬라이더 생성
                 importances = model.feature_importances_
@@ -103,13 +103,13 @@ if df is not None:
                 m_df['AI_판정'] = preds_fixed 
 
                 # 탭 생성
-                tab_perf, tab_sim = st.tabs(["⏳ 로트별 예측 추이", "✨ 모델성능 지표 및 예측 시뮬레이션"])
+                tab_perf, tab_sim = st.tabs([" 로트별 예측 추이", " 모델성능 지표 및 예측 시뮬레이션"])
 
                 # =================================================================
                 # TAB 1: 전체 데이터 예측 및 모델 성능 진단
                 # =================================================================
                 with tab_perf:
-                    st.subheader("📈 전체 데이터 불량 위험도 추이")
+                    st.subheader(" 전체 데이터 불량 위험도 추이")
                     fig_line = px.line(
                         m_df, x=time_col, y='AI_확률',
                         title=f"{selected_machine} 시간대별 불량 예측 확률",
@@ -122,7 +122,7 @@ if df is not None:
                     st.markdown("---")
                     
                     # (B-1) 실제 vs 예측 타임라인
-                    st.subheader("⏱️ 실제 vs 예측 불량 발생 타임라인")
+                    st.subheader("실제 vs 예측 불량 발생 타임라인")
                     timeline_data = []
                     for idx, row in m_df.iterrows():
                         if row['NG_판정'] == 1:
@@ -142,7 +142,7 @@ if df is not None:
 
                 with tab_sim:
                     # (B-2) 모델 성능 평가지표 (Confusion Matrix 등)
-                    st.subheader(f"📊 모델 성능 정밀 진단")
+                    st.subheader(f" 모델 성능 정밀 진단")
                     if 'NG_판정' in m_df.columns:
                         y_true = m_df['NG_판정'].astype(int)
                         y_pred = preds_fixed
@@ -150,14 +150,14 @@ if df is not None:
                         col_p1, col_p2, col_p3 = st.columns([1, 1, 1.5])
                         
                         with col_p1:
-                            st.write("**📉 예측 불량률**")
+                            st.write("**예측 불량률**")
                             ng_count = y_pred.sum()
                             fig_donut = px.pie(names=['정상', '불량'], values=[len(y_pred)-ng_count, ng_count], hole=0.5,
                                              color_discrete_sequence=['#2ecc71', '#e74c3c'])
                             st.plotly_chart(fig_donut, use_container_width=True)
                         
                         with col_p2:
-                            st.write("**🏆 평가지표**")
+                            st.write("**평가지표**")
                             
                             # 1. 지표 계산
                             acc = accuracy_score(y_true, y_pred)
@@ -181,7 +181,7 @@ if df is not None:
                                 st.metric("정밀도", f"{prec:.4f}") # Precision
                         
                         with col_p3:
-                            st.write("**🔲 혼동 행렬**")
+                            st.write("**혼동 행렬**")
                             cm = confusion_matrix(y_true, y_pred)
                             fig_cm = ff.create_annotated_heatmap(cm.tolist(), x=['예측0','예측1'], y=['실제0','실제1'], colorscale='Blues')
                             st.plotly_chart(fig_cm, use_container_width=True)
@@ -190,7 +190,7 @@ if df is not None:
                         # TAB 2: 변수 조절 시뮬레이션 (What-If)
                         # =================================================================
                         with tab_sim:
-                            st.subheader("✅ 변수 조절 시뮬레이션 (What-If)")
+                            st.subheader(" 변수 조절 시뮬레이션 (What-If)")
 
                             # 1. 데이터 계산
                             sim_df = pd.DataFrame([m_df.iloc[-1][features]])
@@ -201,7 +201,7 @@ if df is not None:
                             
                             # 2. 결과 박스 스타일 설정
                             res_color = "#e74c3c" if sim_pred == 1 else "#2ecc71"
-                            res_label = "🚨 로트 샘플링 불량 예상" if sim_pred == 1 else "🎖️ 로트 샘플링 정상 예상"
+                            res_label = " 로트 샘플링 불량 예상" if sim_pred == 1 else " 로트 샘플링 정상 예상"
 
                             sc1, sc2 = st.columns([1, 1.2])
                             
@@ -209,7 +209,7 @@ if df is not None:
                                 # 상단 메트릭 배치
                                 m1, m2 = st.columns([1, 1.2])
                                 with m1:
-                                    st.metric("**🎯 시뮬레이션 확률**", f"{sim_prob*100:.1f}%", 
+                                    st.metric("**시뮬레이션 확률**", f"{sim_prob*100:.1f}%", 
                                             delta=f"{(sim_prob - probs[-1])*100:.1f}%p", delta_color="inverse")
                                 with m2:
                                     st.markdown(f"""
@@ -273,7 +273,7 @@ if df is not None:
 
                             with sc2:
                                 # 서브제목을 오른쪽으로 살짝 밀기 (&nbsp; 추가)
-                                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;📦 **1로트 품질 현황** (24 Shots)")
+                                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp; **1로트 품질 현황** (24 Shots)")
                                 
                                 num_shots = 24 
                                 num_shot_ng = int(round(num_shots * sim_prob))
@@ -284,14 +284,14 @@ if df is not None:
 
                                 lot_data = pd.DataFrame({
                                     'shot_id': [f"S{i+1}" for i in range(num_shots)],
-                                    '상태': ["🚨 불량" if s == 1 else "✅ 정상" for s in status_list],
+                                    '상태': [" 불량" if s == 1 else "✅ 정상" for s in status_list],
                                     'x': [i % 6 for i in range(num_shots)],
                                     'y': [i // 6 for i in range(num_shots)]
                                 })
 
                                 fig_sim = px.scatter(
                                     lot_data, x='x', y='y', text='shot_id', color='상태',
-                                    color_discrete_map={"🚨 불량": "#e74c3c", "✅ 정상": "#2ecc71"},
+                                    color_discrete_map={" 불량": "#e74c3c", "✅ 정상": "#2ecc71"},
                                     range_x=[-0.6, 5.6], range_y=[-0.6, 3.6]
                                 )
                                 fig_sim.update_traces(
@@ -311,7 +311,7 @@ if df is not None:
                                 # 하단 캡션 (검은색)
                                 st.markdown(f"""
                                     <div style="text-align: center; color: black; font-size: 1.0em; margin-top: -5px; font-weight: bold;">
-                                        📢 24개의 Shot 중 <span style="color:#e74c3c;">{num_shot_ng}개</span>의 확률이 불량입니다.
+                                         24개의 Shot 중 <span style="color:#e74c3c;">{num_shot_ng}개</span>의 확률이 불량입니다.
                                     </div>
                                 """, unsafe_allow_html=True)
 
