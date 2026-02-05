@@ -129,7 +129,7 @@ def load_local_data(month_key):
 def main():
     # 1. 사이드바: 데이터 로드 및 설비 선택
     with st.sidebar:
-        st.header(" 분석 설정")
+        st.header("⚙️ 분석 설정")
         month_options = list(DATA_IDS.keys()) 
         selected_month = st.selectbox("1. 분석 월 선택", month_options)
         
@@ -142,15 +142,26 @@ def main():
             
             model_info = load_single_model(target_mach)
             if model_info:
-                st.success(f"✅ {target_mach} 모델 로드 완료")
+                st.success(f" {target_mach} 모델 로드 완료")
                 data_ready = True
             else:
-                st.warning(f"⚠️ {target_mach} 모델 없음")
+                st.warning(f" {target_mach} 모델 없음")
         else:
             st.error("데이터를 불러올 수 없습니다.")
 
+        # [요구사항 4] 사이드바 주의사항 추가
+        st.markdown("---")
+        st.error(
+            """
+            ** 주의사항**
+            
+            **반드시 데이터가 모두 로드된 후에 분석 월과 분석 설비를 선택해주세요.** 
+            스트림릿의 램 용량 부족으로 인해 서버에 과부하가 걸릴 수 있습니다.
+            """
+        )
+
     # --- [메인 화면] ---
-    st.title(" 사출 공정 스마트 상세 분석 대시보드")
+    st.title(" 사출 공정 스마트 상세 분석 대시보드 (이상치 탐지)")
 
     if data_ready and not full_df.empty:
         st.subheader(f" {target_mach} 설비 상세 분석 ({selected_month})")
@@ -211,18 +222,19 @@ def main():
         col1, col2, col3 = st.columns(3)
         col1.metric("설비 그룹", info.get('group', 'Unknown'))
         col2.metric("전체 사이클", f"{len(m_df):,} Shot")
-        col3.metric("평균 불량률", f"{(m_df['y_pred'].sum() / len(m_df) * 100):.2f}%", delta_color="inverse")
-
+        col3.metric("평균 이상 발생률", f"{(m_df['y_pred'].sum() / len(m_df) * 100):.2f}%", delta_color="inverse")
+           # [요구사항 1] 종합 판정 결과 하단 설명 추가 (가독성을 위해 카드 위에 배치)
+        st.info(f" **{selected_month} {target_mach} 설비**의 전체 생산 Shot 중에서 공정 과정에 이상이 생겼다고 판단되는 불량입니다.\n\n(설비의 특정 센서값이 이전 패턴과 달라졌음을 의미합니다.)")
         st.divider()
         
         col_sub1, col_sub2 = st.columns([1, 2])
 
         # ==============================================================================
-        # [수정 2] 좌측: 월간 종합 상태 요약 (정상 vs 이상 개수)
+        # 좌측: 월간 종합 상태 요약 (정상 vs 이상 개수)
         # ==============================================================================
         with col_sub1:
             st.subheader(f" {selected_month} 종합 판정 결과")
-            
+
             total_ng = int(m_df['y_pred'].sum())
             total_ok = int(len(m_df) - total_ng)
             
@@ -250,11 +262,14 @@ def main():
             """, unsafe_allow_html=True)
 
         # ==============================================================================
-        # [수정 1] 우측: 월간 변수 기여도 분석 (Top 5)
+        # 우측: 월간 변수 기여도 분석 (Top 5)
         # ==============================================================================
         with col_sub2:
             st.subheader(f" {selected_month} 주요 변동 요인 (Top 5)")
             
+            # [요구사항 2] 주요 변동 요인 설명 추가
+            st.caption(" 공정이 바뀌었다고 판단하는 지표 중 가장 많은 영향력을 가진 주요 5가지 변수입니다.")
+
             # 전체 기간 잔차의 절대값 평균을 구함 (변동성이 컸던 변수 찾기)
             # 컬럼명에서 _resid 제거하여 표시
             monthly_importance = X_res.abs().mean().sort_values(ascending=False).head(5)
@@ -280,10 +295,13 @@ def main():
         st.divider()
         
         # ==============================================================================
-        # [수정 3] 하단: 일별 정상/불량 그래프 (날짜 슬라이더 제거)
+        # 하단: 일별 정상/불량 그래프 (날짜 슬라이더 제거)
         # ==============================================================================
         st.subheader(" 일별 생산 및 품질 현황")
         
+        # [요구사항 3] 일별 현황 설명 추가
+        st.info(" 이상치 탐지 모델의 하루 **정상 판단 Shot** 개수와 **이상 판단 Shot** 개수를 비교해볼 수 있습니다.\n\n단순 제품 불량이 아닌, **설비의 이상(공정 변화)을 판단하는 지표**입니다.")
+
         # 일별, 판정별 집계
         daily_df = m_df.copy()
         daily_df['Date'] = daily_df['Timestamp_사출'].dt.date
@@ -321,7 +339,7 @@ def main():
             st.info("표시할 일별 데이터가 없습니다.")
 
     else:
-        st.info("👈 사이드바에서 월(Month)과 설비를 선택하고 데이터 로드를 기다려주세요.")
+        st.info(" 사이드바에서 월(Month)과 설비를 선택하고 데이터 로드를 기다려주세요.")
 
 if __name__ == "__main__":
     main()
