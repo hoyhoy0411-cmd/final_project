@@ -186,7 +186,7 @@ with tab_kpi:
         st.subheader(" 설비별 불량률 순위")
         
         # --- [추가 1] 불량률 순위 설명 문구 ---
-        st.caption(f" **{selected_display_month}** 기준, 설비별 불량률 순위입니다. 불량률이 높은 설비를 우선적으로 확인하세요.")
+        st.info(f" **{selected_display_month}** 기준, 설비별 불량률 순위입니다. 불량률이 높은 설비를 우선적으로 확인하세요.")
         # ------------------------------------
 
         m_stats = df_filtered_month.groupby('MACHNO', observed=True)['Result'].value_counts().unstack(fill_value=0)
@@ -233,6 +233,7 @@ with tab_kpi:
 # ==============================================================================
 with tab_detail:
     st.markdown(f"###  {selected_machine} 설비 정밀 분석 리포트")
+    st.info(f" {selected_display_month} **{selected_machine}** 설비의 shot 단위 상세 품질 지표 및 일별 추이 분석")
     m_df = df_filtered_month[df_filtered_month['MACHNO'] == selected_machine].sort_values('Timestamp_사출')
     if 'Timestamp_사출' in m_df.columns:
         m_df['Date'] = m_df['Timestamp_사출'].dt.date
@@ -298,9 +299,6 @@ with tab_detail:
                                     xaxis=dict(tickformat="%Y-%m-%d"),
                                     legend=dict(orientation="h", y=1.1))
         st.plotly_chart(fig_line_prod, width='stretch')
-
-    st.write("---")
-    st.write(f" {selected_machine} 품질 진단")
     
     p_avg = 0.05
     if not df_final.empty:
@@ -315,9 +313,10 @@ with tab_detail:
     else:
         st.error(f" **위험**: 불량률이 관리 한계를 초과했습니다.")
 
+    st.write("---")
     # 일별 불량률 추이
-    st.subheader(" 일별 불량률 추이 (비가동 구간 포함)")
-    
+    st.subheader(f" {selected_machine} 일별 불량률 추이")
+    st.info("일별 불량률 추이와 비가동 구간(회색 영역)을 함께 확인할 수 있습니다.")
     if not m_df.empty:
         start_date = m_df['Date'].min()
         end_date = m_df['Date'].max()
@@ -333,15 +332,39 @@ with tab_detail:
         existing_days = daily_stats['Date'].tolist()
         missing_days = [d for d in all_days if d not in existing_days]
 
+        # 1. 메인 라인 차트 그리기
         fig_line = px.line(daily_stats, x='Date', y='Rate', markers=True, text=daily_stats['Rate'].apply(lambda x: f'{x:.1f}'))
         
+        # 2. 비가동 구간(회색 영역) 그리기
         for m_day in missing_days:
             fig_line.add_vrect(x0=pd.to_datetime(m_day)-pd.Timedelta(hours=12),
                                x1=pd.to_datetime(m_day)+pd.Timedelta(hours=12),
                                fillcolor="Gray", opacity=0.15, layer="below", line_width=0)
 
-        fig_line.update_traces(line_color='#e74c3c', textposition="top center")
-        fig_line.update_layout(height=400, xaxis=dict(tickformat="%d일"), yaxis_title="불량률(%)")
+        # 3. 메인 라인 스타일 업데이트 (먼저 적용)
+        fig_line.update_traces(line_color='#e74c3c', textposition="top center", name='불량률')
+
+        # 4. [추가됨] '비가동 구간' 범례 생성을 위한 더미 트레이스 추가
+        # 실제 그래프에는 점을 찍지 않기 위해 x, y에 [None]을 넣습니다.
+        if missing_days:
+            fig_line.add_trace(go.Scatter(
+                x=[None], 
+                y=[None],
+                mode='markers',
+                marker=dict(size=15, color='Gray', symbol='square', opacity=0.5), # 범례에 보일 아이콘 스타일
+                name='비가동 구간',
+                showlegend=True,
+                hoverinfo='none'
+            ))
+
+        # 5. 레이아웃 업데이트
+        fig_line.update_layout(
+            height=400, 
+            xaxis=dict(tickformat="%d일"), 
+            yaxis_title="불량률(%)",
+            legend=dict(orientation="h", y=1.1) # 범례 위치 조정 (선택사항)
+        )
+        
         st.plotly_chart(fig_line, width='stretch')
 
 # ==============================================================================
@@ -349,7 +372,7 @@ with tab_detail:
 # ==============================================================================
 with tab_analysis:
     st.subheader(" 불량(NG) 데이터 특성 상세 분석")
-    
+    st.info(f" {selected_display_month} **{selected_machine}** 설비의 불량 데이터에 대한 주요 특성 분석 및 시각화")
     available_dates = ["전체(해당 월)"] + sorted(m_df['Date'].unique().astype(str).tolist(), reverse=True)
     selected_date_analysis = st.selectbox(" 분석 기간 선택", available_dates, key="analysis_date")
 
@@ -398,6 +421,7 @@ with tab_analysis:
             st.warning("분석할 공정 데이터 컬럼을 찾을 수 없습니다.")
     else:
         st.success(f" {label}에는 불량 데이터가 없습니다.")
+
 
 
 
