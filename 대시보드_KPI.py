@@ -104,7 +104,7 @@ if df_shot.empty:
 
 # 3. 설비 선택
 machine_list = sorted(df_shot['MACHNO'].unique().tolist())
-selected_machine = st.sidebar.selectbox("🏗️ 분석 대상 설비", options=machine_list)
+selected_machine = st.sidebar.selectbox(" 분석 대상 설비", options=machine_list)
 
 # --- [추가] 사이드바 페이지 가이드 설명 ---
 st.sidebar.markdown("---")
@@ -421,6 +421,7 @@ with tab_analysis:
             st.warning("분석할 공정 데이터 컬럼을 찾을 수 없습니다.")
     else:
         st.success(f" {label}에는 불량 데이터가 없습니다.")
+
 
 
 
