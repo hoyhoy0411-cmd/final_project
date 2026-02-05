@@ -153,7 +153,7 @@ def main():
         st.markdown("---")
         st.error(
             """
-            **주의사항**
+            ** 주의사항**
             
             **반드시 데이터가 모두 로드된 후에 분석 월과 분석 설비를 선택해주세요.** 
             스트림릿의 램 용량 부족으로 인해 서버에 과부하가 걸릴 수 있습니다.
@@ -165,7 +165,8 @@ def main():
 
     if data_ready and not full_df.empty:
         st.subheader(f" {target_mach} 설비 상세 분석 ({selected_month})")
-        
+        st.info(f" **{selected_month} {target_mach} 설비**의 전체 생산 Shot 중에서 공정 과정에 이상이 생겼다고 판단되는 불량입니다.\n\n(설비의 특정 센서값이 이전 패턴과 달라졌음을 의미합니다.)")
+
         # 1. 데이터 필터링
         m_df = full_df[full_df['MACHNO'] == target_mach].copy().reset_index(drop=True)
         
@@ -223,8 +224,6 @@ def main():
         col1.metric("설비 그룹", info.get('group', 'Unknown'))
         col2.metric("전체 사이클", f"{len(m_df):,} Shot")
         col3.metric("평균 이상 발생률", f"{(m_df['y_pred'].sum() / len(m_df) * 100):.2f}%", delta_color="inverse")
-           # [요구사항 1] 종합 판정 결과 하단 설명 추가 (가독성을 위해 카드 위에 배치)
-        st.info(f" **{selected_month} {target_mach} 설비**의 전체 생산 Shot 중에서 공정 과정에 이상이 생겼다고 판단되는 불량입니다.\n\n(설비의 특정 센서값이 이전 패턴과 달라졌음을 의미합니다.)")
         st.divider()
         
         col_sub1, col_sub2 = st.columns([1, 2])
@@ -343,6 +342,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
