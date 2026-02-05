@@ -8,5 +8,6 @@ requests
 pyarrow
 gdown
 xgboost
+shap
 
 
