@@ -9,6 +9,7 @@ from datetime import datetime
 import os
 import gdown
 from io import BytesIO
+import shap
 
 BASE_DIR = os.getcwd()
 
@@ -261,37 +262,103 @@ def main():
             """, unsafe_allow_html=True)
 
         # ==============================================================================
-        # 우측: 월간 변수 기여도 분석 (Top 5)
+        # 우측: SHAP 기반 주요 변동 요인 분석 (Top 5) - 오류 수정 버전
         # ==============================================================================
         with col_sub2:
-            st.subheader(f" {selected_month} 주요 변동 요인 (Top 5)")
-            
-            # [요구사항 2] 주요 변동 요인 설명 추가
-            st.caption(" 공정이 바뀌었다고 판단하는 지표 중 가장 많은 영향력을 가진 주요 5가지 변수입니다.")
+            st.subheader(f" {selected_month} AI 모델 주요 판단 요인 (SHAP)")
+            st.caption(" AI 모델이 '이상(NG)' 또는 '정상(OK)'으로 판단할 때 가장 큰 영향을 미친 상위 5개 변수입니다.")
 
-            # 전체 기간 잔차의 절대값 평균을 구함 (변동성이 컸던 변수 찾기)
-            # 컬럼명에서 _resid 제거하여 표시
-            monthly_importance = X_res.abs().mean().sort_values(ascending=False).head(5)
-            monthly_importance.index = [c.replace('_resid', '') for c in monthly_importance.index]
+            # 1. Feature Name 리스트 생성
+            base_cols = list(X.columns)
+            resid_cols = list(X_res.columns)
+            feature_names = base_cols + resid_cols
             
-            fig_imp = go.Figure(go.Bar(
-                x=monthly_importance.values,
-                y=monthly_importance.index,
-                orientation='h',
-                marker=dict(color=monthly_importance.values, colorscale='Blues'),
-                text=[f"{v:.4f}" for v in monthly_importance.values],
-                textposition='auto'
-            ))
+            # Polynomial Feature 이름 추가 로직
+            if target_mach == 'G06' or info.get('group') == '난조군':
+                try:
+                    poly_names = poly.get_feature_names_out(top_cols)
+                    feature_names.extend(poly_names)
+                except:
+                    current_len = len(feature_names)
+                    remain_len = X_final.shape[1] - current_len
+                    feature_names.extend([f"Poly_Feature_{i}" for i in range(remain_len)])
             
-            fig_imp.update_layout(
-                xaxis_title="평균 변동량 (Mean Abs Residual)",
-                yaxis=dict(autorange="reversed"), # 상위 항목이 위로 오게
-                height=300,
-                margin=dict(l=10, r=10, t=30, b=10)
-            )
-            st.plotly_chart(fig_imp, use_container_width=True)
+            # 2. SHAP 값 계산
+            with st.spinner("SHAP 중요도 분석 중... (잠시만 기다려주세요)"):
+                try:
+                    # (1) 샘플링: 데이터 100개로 축소 (속도 최적화 및 오류 방지)
+                    # KernelExplainer 사용 가능성이 있으므로 샘플 수를 100개로 줄이는 것이 안전함
+                    sample_size = 100
+                    if X_scaled.shape[0] > sample_size:
+                        indices = np.random.choice(X_scaled.shape[0], sample_size, replace=False)
+                        X_sample = X_scaled[indices]
+                    else:
+                        X_sample = X_scaled
 
-        st.divider()
+                    model = info['model']
+                    shap_values = None
+
+                    # (2) Explainer 시도 (순차적 적용)
+                    try:
+                        # 시도 1: TreeExplainer (XGBoost에 가장 적합)
+                        explainer = shap.TreeExplainer(model)
+                        # check_additivity=False는 정밀도 오차로 인한 멈춤 방지
+                        shap_values = explainer.shap_values(X_sample, check_additivity=False)
+                    except Exception as e_tree:
+                        # 시도 2: KernelExplainer (범용, 느림) -> 여기서 model이 아니라 predict_proba 함수를 넣어야 함
+                        # st.warning(f"TreeExplainer 실패, KernelExplainer로 전환합니다: {e_tree}")
+                        explainer = shap.KernelExplainer(model.predict_proba, X_sample)
+                        shap_values = explainer.shap_values(X_sample)
+
+                    # (3) 결과 형태 처리 (이진 분류 리스트 대응)
+                    # XGBoost 버전에 따라 shap_values가 리스트일 수도, 배열일 수도 있음
+                    if isinstance(shap_values, list):
+                        # [정상확률에 대한 SHAP, 불량확률에 대한 SHAP] 중 불량(1) 선택
+                        vals = shap_values[1]
+                    else:
+                        vals = shap_values
+                        # 차원이 3차원인 경우(LightGBM 일부 버전 등) 처리
+                        if len(vals.shape) > 2:
+                             vals = vals[:, :, 1] # (샘플, 피쳐, 클래스)
+
+                    # (4) 절대값 평균으로 글로벌 중요도 산출
+                    # Feature 이름 개수와 SHAP 값 개수 매칭 확인
+                    if vals.shape[1] != len(feature_names):
+                        # 길이 안 맞으면 임의 이름 생성 (에러 방지)
+                        feature_names = [f"Var_{i}" for i in range(vals.shape[1])]
+
+                    importance = np.mean(np.abs(vals), axis=0)
+                    
+                    # 데이터프레임 변환
+                    shap_df = pd.DataFrame({
+                        'Feature': feature_names,
+                        'Importance': importance
+                    })
+
+                    # Top 5 추출
+                    top_5_shap = shap_df.sort_values(by='Importance', ascending=False).head(5)
+                    
+                    # 3. 시각화 (Plotly)
+                    fig_shap = go.Figure(go.Bar(
+                        x=top_5_shap['Importance'],
+                        y=top_5_shap['Feature'],
+                        orientation='h',
+                        marker=dict(color=top_5_shap['Importance'], colorscale='Reds'),
+                        text=[f"{v:.4f}" for v in top_5_shap['Importance']],
+                        textposition='auto'
+                    ))
+
+                    fig_shap.update_layout(
+                        xaxis_title="평균 SHAP 중요도 (Mean |SHAP|)",
+                        yaxis=dict(autorange="reversed"),
+                        height=300,
+                        margin=dict(l=10, r=10, t=30, b=10)
+                    )
+                    st.plotly_chart(fig_shap, use_container_width=True)
+
+                except Exception as e:
+                    st.error(f"SHAP 분석 오류: {e}")
+                    st.markdown("⚠️ 모델 호환성 문제로 변수 중요도를 표시할 수 없습니다.")
         
         # ==============================================================================
         # 하단: 일별 정상/불량 그래프 (날짜 슬라이더 제거)
@@ -342,6 +409,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
