@@ -58,7 +58,7 @@ df = load_csv_data()
 if df is not None:
     # 3. 모델이 있는 설비 리스트만 추출
     machine_list = sorted(list(MODEL_IDS.keys()))
-    selected_machine = st.sidebar.selectbox("🔍 분석할 설비 선택", machine_list)
+    selected_machine = st.sidebar.selectbox(" 분석할 설비 선택", machine_list)
 
     if selected_machine:
         m_df = df[df['MACHNO'].astype(str) == str(selected_machine)].copy()
@@ -77,7 +77,7 @@ if df is not None:
             # --- [1. 사이드바 시뮬레이션 설정] --- 
                 # 슬라이더는 탭 외부(사이드바)에 있어야 어떤 탭에서도 시뮬레이션 값을 유지할 수 있습니다.
                 st.sidebar.markdown("---")
-                st.sidebar.subheader("🛠️ 시뮬레이션 설정")
+                st.sidebar.subheader(" 시뮬레이션 설정")
     
                 sim_threshold = st.sidebar.slider(" 판정 임계값 설정", 0.0, 1.0, fixed_threshold, 0.05)
     
@@ -378,5 +378,6 @@ if df is not None:
                 st.error("모델 파일을 찾을 수 없습니다.")
 else:
     st.error("CSV 파일을 찾을 수 없습니다.")
+
 
 
