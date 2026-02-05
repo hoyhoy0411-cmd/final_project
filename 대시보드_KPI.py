@@ -106,6 +106,23 @@ if df_shot.empty:
 machine_list = sorted(df_shot['MACHNO'].unique().tolist())
 selected_machine = st.sidebar.selectbox("🏗️ 분석 대상 설비", options=machine_list)
 
+# --- [추가] 사이드바 페이지 가이드 설명 ---
+st.sidebar.markdown("---")
+st.sidebar.subheader(" 페이지 이용 가이드")
+st.sidebar.info(
+    """
+    **1. 대시보드 KPI**
+    - 월 단위 공정 추세 및 핵심 지표를 확인하려면 이 페이지를 참고하십시오.
+
+    **2. AI 품질 진단**
+    - 월 단위 불량 예측 머신러닝 모델의 성능을 확인하려면 **AI 품질 진단** 페이지를 참고하십시오.
+
+    **3. 이상치 탐지**
+    - 설비 불량을 예측하는 이상 탐지 프로그램의 월 단위 분석을 확인하려면 **이상치 탐지** 페이지를 참고하십시오.
+    """
+)
+# ----------------------------------------
+
 # 4. 전월 데이터 로드 (KPI 비교용, 선택사항)
 current_idx = raw_month_list.index(selected_month)
 if current_idx + 1 < len(raw_month_list):
@@ -126,15 +143,15 @@ tab_kpi, tab_detail, tab_analysis = st.tabs([" 공장 전체 KPI", " 설비 상�
 # ==============================================================================
 with tab_kpi:
     st.title(" 공정 품질 핵심 성과 지표 (KPI)")
-    st.info(f" 공장 전체 설비 가동 현황 요약")
+    st.info(f" {selected_display_month} 공장 전체 설비 가동 현황 요약")
     
-    # [1] 핵심 메트릭
+    # [1] 핵심 메트릭 (기존 코드와 동일)
     total_qty = len(df_filtered_month)
     total_ng = len(df_filtered_month[df_filtered_month['Result'] == '불량(NG)'])
     total_ok = total_qty - total_ng
     avg_defect_rate = (total_ng / total_qty * 100) if total_qty > 0 else 0
 
-    # 전월 비교
+    # 전월 비교 로직 (기존 코드와 동일)
     has_history = False
     if not df_last_month.empty:
         l_total = len(df_last_month)
@@ -167,7 +184,11 @@ with tab_kpi:
     
     with col_a:
         st.subheader(" 설비별 불량률 순위")
-        # value_counts는 category 타입에서 매우 빠름
+        
+        # --- [추가 1] 불량률 순위 설명 문구 ---
+        st.caption(f" **{selected_display_month}** 기준, 설비별 불량률 순위입니다. 불량률이 높은 설비를 우선적으로 확인하세요.")
+        # ------------------------------------
+
         m_stats = df_filtered_month.groupby('MACHNO', observed=True)['Result'].value_counts().unstack(fill_value=0)
         for col in ['불량(NG)', '정상(OK)']:
             if col not in m_stats.columns: m_stats[col] = 0
@@ -185,6 +206,11 @@ with tab_kpi:
 
     with col_b:
         st.subheader(" 설비별 생산량 추이 비교")
+        
+        # --- [추가 2] 생산량 추이 설명 문구 ---
+        st.info(f" **{selected_display_month}** 설비별 생산량 추이를 비교해볼 수 있습니다. 아래에서 **비교 대상 설비**를 선택해주세요.")
+        # ------------------------------------
+
         compare_machines = st.multiselect("비교 대상 설비", options=machine_list, default=[selected_machine])
         
         if compare_machines:
@@ -274,7 +300,7 @@ with tab_detail:
         st.plotly_chart(fig_line_prod, width='stretch')
 
     st.write("---")
-    st.write(f"💡 {selected_machine} 품질 진단")
+    st.write(f" {selected_machine} 품질 진단")
     
     p_avg = 0.05
     if not df_final.empty:
@@ -322,7 +348,7 @@ with tab_detail:
 # TAB 3: 불량 원인 분석
 # ==============================================================================
 with tab_analysis:
-    st.subheader("🚨 불량(NG) 데이터 특성 상세 분석")
+    st.subheader(" 불량(NG) 데이터 특성 상세 분석")
     
     available_dates = ["전체(해당 월)"] + sorted(m_df['Date'].unique().astype(str).tolist(), reverse=True)
     selected_date_analysis = st.selectbox(" 분석 기간 선택", available_dates, key="analysis_date")
@@ -352,7 +378,12 @@ with tab_analysis:
                 diff = ng_mean[col] - ok_mean[col]
                 cols[i].metric(col, f"{ng_mean[col]:.2f}", f"{diff:+.2f}", delta_color="inverse")
 
-            st.write("#### 🕸️ 정상 대비 변동 비율 (%)")
+            st.write("####  정상 대비 변동 비율 (%)")
+            
+            # --- [추가 3] 변동 비율 설명 문구 ---
+            st.warning("ℹ 주요 특성 중 **정상의 평균을 100**이라고 가정했을 때, **불량 제품의 평균이 상대적으로 벗어난 수치**입니다. (100에서 멀어질수록 이상 징후)")
+            # ----------------------------------
+            
             ratios = [(ng_mean[c] / ok_mean[c] * 100) if ok_mean[c] != 0 else 0 for c in valid_cols]
             
             r_data = ratios + [ratios[0]]
