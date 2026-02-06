@@ -57,6 +57,13 @@ GROUPS = {
     '난조군': ['G01', 'G02', 'G06'] 
 }
 
+# 3-1. 그룹별 특성 설명 (이미지 기반 추가)
+GROUP_DESCRIPTIONS = {
+    '고성능군': "불량 패턴이 명확하고 정상 데이터와 구분이 쉬운 설비들입니다.",
+    '안정군': "공정이 비교적 일정하게 유지되나 간헐적인 튀는 값이 존재하는 설비들입니다.",
+    '난조군': "데이터 노이즈가 심하고 정상/불량 경계가 모호한 고난도 설비들입니다."
+}
+
 # 4. 설비별 대응 전략 정의
 STRATEGIES = {
     "D01": {
@@ -129,6 +136,14 @@ STRATEGIES = {
             "**극단적 안정성 확보**: 변동계수(CV)가 커지지 않도록 관리",
             "**동적 이력 관리**: 직전 작업(lag1) 모니터링으로 규칙성 단절 방지",
             "**비율 및 차이 유지**: 온도 차이(diff) 등 파생 변수의 밀집도 유지"
+        ]
+    },
+    "G01": {
+        "priority": "열적 평형 유지 및 절대 임계치(Hard-Limit) 정밀 제어",
+        "actions": [
+            "**지속적 열적 평형**: 금형 온도가 낮아지지 않도록 충분한 온도를 확보하여 냉각 과다 방지",
+            "**쿠션량 정밀 구간 관리**: 최소 쿠션이 과소/과다 영역으로 진입하지 않도록 좁은 타겟 윈도우(Window) 내 제어",
+            "**절대 임계치(Limit) 중심**: 잔차(리듬) 변화보다는 설정된 절대 상/하한값 이탈 여부에 집중 감시"
         ]
     }
 }
@@ -305,10 +320,19 @@ def main():
             st.info(f" **{selected_month} {target_mach} 설비**의 전체 생산 Shot 중에서 공정 과정에 이상이 생겼다고 판단되는 불량입니다.\n\n(설비의 특정 센서값이 이전 패턴과 달라졌음을 의미합니다.)")
 
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("설비 그룹", info.get('group', 'Unknown'))
+            
+            # 그룹 정보 가져오기
+            current_group = info.get('group', 'Unknown')
+            
+            col1.metric("설비 그룹", current_group)
             col2.metric("전체 사이클", f"{len(m_df):,} Shot")
             col3.metric("이상 판단 수", f"{m_df['y_pred'].sum():,} Shot")
             col4.metric("평균 이상 발생률", f"{(m_df['y_pred'].sum() / len(m_df) * 100):.2f}%", delta_color="inverse")
+            
+            # [추가됨] 그룹별 상세 설명 표시
+            if current_group in GROUP_DESCRIPTIONS:
+                st.caption(f" **{current_group} 특성**: {GROUP_DESCRIPTIONS[current_group]}")
+            
             st.divider()
 
             col_sub1, col_sub2 = st.columns([1, 2])
@@ -493,6 +517,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
