@@ -112,7 +112,7 @@ if df is not None:
                     st.subheader(" 전체 데이터 불량 위험도 추이")
                     
                     # --- [추가 1] 위험도 추이 설명 문구 ---
-                    st.info(" **24 Shot 기준 1 Lot**, 각 Lot에 대해 머신러닝 모델이 불량을 예측한 추이입니다. **판정 기준선(Threshold)** 을 초과할 경우 불량 Lot로 예측합니다.")
+                    st.info(" 각 24shot 묶음에 대해 머신러닝 모델이 불량을 예측한 추이입니다. **판정 기준선(Threshold)** 을 초과할 경우 불량 묶음으로 예측합니다.")
                     # ------------------------------------
 
                     fig_line = px.line(
@@ -130,7 +130,7 @@ if df is not None:
                     st.subheader(" 실제 vs 예측 불량 발생 타임라인")
                     
                     # --- [추가 2] 타임라인 설명 문구 ---
-                    st.info("Lot에서 발생한 **예측 불량**과 **실제 불량**을 시간순으로 시각적으로 비교하여 확인할 수 있습니다.")
+                    st.info("24shot 묶음에서 발생한 **예측 불량**과 **실제 불량**을 시간순으로 시각적으로 비교하여 확인할 수 있습니다.")
                     # ----------------------------------
 
                     timeline_data = []
@@ -213,7 +213,7 @@ if df is not None:
                         st.subheader(" 변수 조절 시뮬레이션 (What-If)")
 
                         # --- [추가 4] 시뮬레이션 설명 문구 ---
-                        st.info(" **사이드바의 시뮬레이션 설정**을 통해 변수(공정 조건) 변화에 따른 모델의 불량 예측 결과를 실시간으로 확인할 수 있으며, **1 Lot 내의 24 Shot**에 미치는 영향도를 시각적으로 보여줍니다.")
+                        st.info(" **사이드바의 시뮬레이션 설정**을 통해 변수(공정 조건) 변화에 따른 모델의 불량 예측 결과를 실시간으로 확인할 수 있으며, **24 Shot 묶음**에 미치는 영향도를 시각적으로 보여줍니다.")
                         # ------------------------------------
 
                         # 1. 데이터 계산
@@ -225,7 +225,7 @@ if df is not None:
                         
                         # 2. 결과 박스 스타일 설정
                         res_color = "#e74c3c" if sim_pred == 1 else "#2ecc71"
-                        res_label = " 로트 샘플링 불량 예상" if sim_pred == 1 else "✅ 로트 샘플링 정상 예상"
+                        res_label = " 24shot 샘플링 불량 예상" if sim_pred == 1 else "✅ 24shot 샘플링 정상 예상"
 
                         sc1, sc2 = st.columns([1, 1.2])
                         
@@ -297,7 +297,7 @@ if df is not None:
 
                         with sc2:
                             # 서브제목을 오른쪽으로 살짝 밀기 (&nbsp; 추가)
-                            st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp; **1로트 품질 현황** (24 Shots)")
+                            st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp; **24shot 품질 현황** ")
                             
                             # --- [수정] 설비별 NG 판정률(%) 기준 정의 ---
                             # 1로트 전체의 불량률이 이 수치를 넘어가면 불량 로트로 판정
@@ -357,9 +357,6 @@ if df is not None:
                             )
                             st.plotly_chart(fig_sim, use_container_width=True)
 
-                            # 하단 설명 문구 (요청하신 형식 반영)
-                            # "000설비의 1로트당 정상 샷은 ~개 이하일때 로트가 정상으로 판정됩니다."
-                            # (문맥상 '불량 샷'이 기준이므로 '불량 샷'으로 명시하여 오해를 방지했습니다)
                             
                             # 상태에 따른 색상 및 텍스트 설정
                             if sim_pred == 1:
@@ -369,7 +366,7 @@ if df is not None:
 
                             st.markdown(f"""
                                 <div style="text-align: center; color: black; font-size: 0.95em; margin-top: -5px; line-height: 1.5; background-color: #f0f2f6; padding: 10px; border-radius: 5px;">
-                                     <b>{selected_machine} 설비</b>의 1로트당 불량 샷(NG Shot)은<br>
+                                     <b>{selected_machine} 설비</b>의 24shot 묶음에서 불량 샷(NG Shot)은<br>
                                      <b>{max_ok_shot_count}개 이하</b>일 때 로트가 <b>정상</b>으로 판정됩니다.<br>
                                      (현재 시뮬레이션 상태: {state_text})
                                 </div>
