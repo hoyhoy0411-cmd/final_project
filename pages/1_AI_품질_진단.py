@@ -103,7 +103,7 @@ if df is not None:
                 m_df['AI_판정'] = preds_fixed 
 
                 # 탭 생성
-                tab_perf, tab_sim = st.tabs([" 로트별 예측 추이", " 모델성능 지표 및 예측 시뮬레이션"])
+                tab_perf, tab_sim = st.tabs([" 24shot별 예측 추이", " 모델성능 지표 및 예측 시뮬레이션"])
 
                 # =================================================================
                 # TAB 1: 전체 데이터 예측 및 모델 성능 진단
@@ -112,7 +112,7 @@ if df is not None:
                     st.subheader(" 전체 데이터 불량 위험도 추이")
                     
                     # --- [추가 1] 위험도 추이 설명 문구 ---
-                    st.info(" 각 24shot 묶음에 대해 머신러닝 모델이 불량을 예측한 추이입니다. **판정 기준선(Threshold)** 을 초과할 경우 불량 묶음으로 예측합니다.")
+                    st.info(" 각 24shot 세트에 대해 머신러닝 모델이 불량을 예측한 추이입니다. **판정 기준선(Threshold)** 을 초과할 경우 불량 묶음으로 예측합니다.")
                     # ------------------------------------
 
                     fig_line = px.line(
@@ -130,7 +130,7 @@ if df is not None:
                     st.subheader(" 실제 vs 예측 불량 발생 타임라인")
                     
                     # --- [추가 2] 타임라인 설명 문구 ---
-                    st.info("24shot 묶음에서 발생한 **예측 불량**과 **실제 불량**을 시간순으로 시각적으로 비교하여 확인할 수 있습니다.")
+                    st.info("24shot 세트에서 발생한 **예측 불량**과 **실제 불량**을 시간순으로 시각적으로 비교하여 확인할 수 있습니다.")
                     # ----------------------------------
 
                     timeline_data = []
@@ -366,8 +366,8 @@ if df is not None:
 
                             st.markdown(f"""
                                 <div style="text-align: center; color: black; font-size: 0.95em; margin-top: -5px; line-height: 1.5; background-color: #f0f2f6; padding: 10px; border-radius: 5px;">
-                                     <b>{selected_machine} 설비</b>의 24shot 묶음에서 불량 샷(NG Shot)은<br>
-                                     <b>{max_ok_shot_count}개 이하</b>일 때 로트가 <b>정상</b>으로 판정됩니다.<br>
+                                     <b>{selected_machine} 설비</b>의 24shot 세트에서 불량 샷(NG Shot)은<br>
+                                     <b>{max_ok_shot_count}개 이하</b>일 때 세트가 <b>정상</b>으로 판정됩니다.<br>
                                      (현재 시뮬레이션 상태: {state_text})
                                 </div>
                             """, unsafe_allow_html=True)
@@ -375,6 +375,7 @@ if df is not None:
                 st.error("모델 파일을 찾을 수 없습니다.")
 else:
     st.error("CSV 파일을 찾을 수 없습니다.")
+
 
 
 
